@@ -1,0 +1,33 @@
+model:
+  bow_levels: ["block3", "block4"]
+  bow_extractor_opts:
+    inv_delta: 15
+    num_words: 8192
+  bow_predictor_opts:
+    kappa: 8
+  alpha: 0.99
+  feature_extractor:
+    class_path: proto_utils.Encoder4L
+    init_args:
+      in_channels: 3
+      hidden_size: 64
+      out_channels: 64
+#optim:
+#  optim_type: "sgd"
+#  momentum: 0.9
+#  weight_decay: 0.0001
+#  nesterov: False
+#  num_epochs: 200
+#  lr: 0.03
+#  end_lr: 0.00003
+#  lr_schedule_type: "cos_warmup"
+#  warmup_epochs: 10
+#  permanent: 10 # save a permanent checkpoint every 10 epochs.
+
+trainer:
+  num_sanity_val_steps: 0
+
+data:
+  dataset: "miniimagenet"
+  datapath: ../data/
+  batch_size: 50

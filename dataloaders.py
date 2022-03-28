@@ -4,28 +4,25 @@ __all__ = ['collate_task', 'collate_task_batch', 'get_episode_loader', 'Unlabell
            'get_simCLR_transform', 'get_omniglot_transform', 'get_custom_transform', 'identity_transform',
            'UnlabelledDataModule', 'OmniglotDataModule', 'MiniImagenetDataModule']
 
-# Cell
-#export
-import h5py
-import os
 import io
-import numpy as np
 import json
+import os
+from collections import OrderedDict
+
+# Cell
+# export
+import h5py
+import numpy as np
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
-
-from collections import OrderedDict
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
-from torchvision.transforms.functional import to_tensor
-from torchvision.utils import make_grid
-from torchvision import transforms
-
 from torchmeta.datasets.helpers import (omniglot, miniimagenet, tieredimagenet,
                                         cub, cifar_fs, doublemnist, triplemnist)
 from torchmeta.utils.data import BatchMetaDataLoader, MetaDataLoader
+from torchvision import transforms
+
 
 # Cell
 
@@ -34,16 +31,18 @@ def collate_task(task):
         return default_collate([task[idx] for idx in range(len(task))])
     elif isinstance(task, OrderedDict):
         return OrderedDict([(key, collate_task(subtask))
-            for (key, subtask) in task.items()])
+                            for (key, subtask) in task.items()])
     else:
         raise NotImplementedError()
+
 
 def collate_task_batch(batch):
     return default_collate([collate_task(task) for task in batch])
 
+
 # Cell
 def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
-                       split, download=True, shuffle=True, num_workers=0):
+                       split, download=True, shuffle=True, num_workers=0, **kwargs):
     """Create an episode data loader for a torchmeta dataset. Can also
     include unlabelled data for semi-supervised learning.
 
@@ -79,9 +78,9 @@ def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
 
     # Collect arguments that are the same for all possible sub-datasets
     kwargs = {'download': download,
-              'meta_train': split=='train',
-              'meta_val': split=='val',
-              'meta_test': split=='test',
+              'meta_train': split == 'train',
+              'meta_val': split == 'val',
+              'meta_test': split == 'test',
               'shuffle': shuffle}
 
     # Create dataset for labelled images
@@ -99,6 +98,7 @@ def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
                           collate_fn=collate_fn,
                           num_workers=num_workers,
                           pin_memory=torch.cuda.is_available())
+
 
 # Cell
 class UnlabelledDataset(Dataset):
@@ -122,7 +122,7 @@ class UnlabelledDataset(Dataset):
         """
         self.n_support = n_support
         self.n_query = n_query
-        self.img_size = (28, 28) if dataset=='omniglot' else (84, 84)
+        self.img_size = (28, 28) if dataset == 'omniglot' else (84, 84)
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
@@ -163,7 +163,7 @@ class UnlabelledDataset(Dataset):
             classes = []
             with h5py.File(os.path.join(datapath, 'data.hdf5'), 'r') as f_data:
                 with open(os.path.join(datapath,
-                          'vinyals_{}_labels.json'.format(split))) as f_labels:
+                                       'vinyals_{}_labels.json'.format(split))) as f_labels:
                     labels = json.load(f_labels)
                     for label in labels:
                         img_set, alphabet, character = label
@@ -194,7 +194,6 @@ class UnlabelledDataset(Dataset):
 
         view_list = []
 
-
         for _ in range(self.n_support):
             if not self.no_aug_support:
                 view_list.append(self.transform(image).unsqueeze(0))
@@ -211,11 +210,13 @@ class UnlabelledDataset(Dataset):
 
         return dict(data=torch.cat(view_list))
 
+
 # Cell
 def get_cub_default_transform(size):
     return transforms.Compose([
         transforms.Resize([int(size[0] * 1.5), int(size[1] * 1.5)]),
         transforms.CenterCrop(size)])
+
 
 def get_simCLR_transform(img_shape):
     """Adapted from https://github.com/sthalles/SimCLR/blob/master/data_aug/dataset_wrapper.py"""
@@ -225,22 +226,24 @@ def get_simCLR_transform(img_shape):
                                           transforms.RandomHorizontalFlip(),
                                           transforms.RandomApply([color_jitter], p=0.8),
                                           transforms.RandomGrayscale(p=0.2),
-                                         # GaussianBlur(kernel_size=int(0.1 * self.input_shape[0])),
+                                          # GaussianBlur(kernel_size=int(0.1 * self.input_shape[0])),
                                           transforms.ToTensor()])
     return data_transforms
 
+
 def get_omniglot_transform(img_shape):
     data_transforms = transforms.Compose([
-                                          transforms.Resize(img_shape[-2:]),
-                                          transforms.RandomResizedCrop(size=img_shape[-2:],
-                                                                       scale=(0.6, 1.4)),
-                                          transforms.RandomHorizontalFlip(p=0.5),
-                                          transforms.RandomVerticalFlip(p=0.5),
-                                          transforms.ToTensor(),
-                                        #   transforms.Lambda(lambda t: F.dropout(t, p=0.3)),
-                                          transforms.RandomErasing()
-                                          ])
+        transforms.Resize(img_shape[-2:]),
+        transforms.RandomResizedCrop(size=img_shape[-2:],
+                                     scale=(0.6, 1.4)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.ToTensor(),
+        #   transforms.Lambda(lambda t: F.dropout(t, p=0.3)),
+        transforms.RandomErasing()
+    ])
     return data_transforms
+
 
 def get_custom_transform(img_shape):
     color_jitter = transforms.ColorJitter(brightness=0.4, contrast=0.4,
@@ -254,9 +257,11 @@ def get_custom_transform(img_shape):
                                           transforms.ToTensor()])
     return data_transforms
 
+
 def identity_transform(img_shape):
     return transforms.Compose([transforms.Resize(img_shape),
                                transforms.ToTensor()])
+
 
 # Cell
 
@@ -271,7 +276,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
         self.n_support = n_support
         self.n_query = n_query
         self.n_classes = n_classes
-        self.img_size = (28, 28) if dataset=='omniglot' else (84, 84)
+        self.img_size = (28, 28) if dataset == 'omniglot' else (84, 84)
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
@@ -294,14 +299,14 @@ class UnlabelledDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         self.dataset_train = UnlabelledDataset(self.dataset,
-                                          self.datapath, split='train',
-                                          transform=None,
-                                          n_images=self.n_images,
-                                          n_classes=self.n_classes,
-                                          n_support=self.n_support,
-                                          n_query=self.n_query,
-                                          no_aug_support=self.no_aug_support,
-                                          no_aug_query=self.no_aug_query)
+                                               self.datapath, split='train',
+                                               transform=None,
+                                               n_images=self.n_images,
+                                               n_classes=self.n_classes,
+                                               n_support=self.n_support,
+                                               n_query=self.n_query,
+                                               no_aug_support=self.no_aug_support,
+                                               no_aug_query=self.no_aug_query)
         if self.merge_train_val:
             dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
                                             transform=None,
@@ -322,12 +327,12 @@ class UnlabelledDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):
         dataloader_val = get_episode_loader(self.dataset, self.datapath,
-                                             ways=self.eval_ways,
-                                             shots=self.eval_support_shots,
-                                             test_shots=self.eval_query_shots,
-                                             batch_size=1,
-                                             split='val',
-                                             **self.kwargs)
+                                            ways=self.eval_ways,
+                                            shots=self.eval_support_shots,
+                                            test_shots=self.eval_query_shots,
+                                            batch_size=1,
+                                            split='val',
+                                            **self.kwargs)
         return dataloader_val
 
     def test_dataloader(self):
@@ -341,20 +346,21 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                              **self.kwargs)
         return dataloader_test
 
+
 # Cell
 class OmniglotDataModule(pl.LightningDataModule):
     def __init__(
-        self,
-        data_dir: str,
-        shots: int,
-        ways: int,
-        shuffle_ds: bool,
-        test_shots: int,
-        meta_train: bool,
-        download: bool,
-        batch_size: str,
-        shuffle: bool,
-        num_workers: int):
+            self,
+            data_dir: str,
+            shots: int,
+            ways: int,
+            shuffle_ds: bool,
+            test_shots: int,
+            meta_train: bool,
+            download: bool,
+            batch_size: str,
+            shuffle: bool,
+            num_workers: int):
         super().__init__()
         self.data_dir = data_dir
         self.shots = shots
@@ -377,6 +383,7 @@ class OmniglotDataModule(pl.LightningDataModule):
             meta_train=self.meta_train,
             download=self.download
         )
+
     def train_dataloader(self):
         return BatchMetaDataLoader(
             self.task_dataset,
@@ -416,6 +423,7 @@ class OmniglotDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers
         )
+
 
 # Cell
 class MiniImagenetDataModule(pl.LightningDataModule):
@@ -459,6 +467,7 @@ class MiniImagenetDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers
         )
+
     def val_dataloader(self):
         self.val_taskset = miniimagenet(
             self.data_dir,

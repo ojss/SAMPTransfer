@@ -1,7 +1,8 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
-import bow_utils as utils
+from . import bow_utils as utils
 
 
 class BoWExtractor(nn.Module):

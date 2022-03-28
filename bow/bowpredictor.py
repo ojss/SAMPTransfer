@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 
-import bow_utils as utils
+from . import bow_utils as utils
 
 
 class BoWPredictor(nn.Module):

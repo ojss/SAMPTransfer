@@ -3,7 +3,7 @@ import math
 import torch.nn as nn
 import torchvision.models as models
 
-import bow_utils as utils
+from . import bow_utils as utils
 
 
 class SequentialFeatureExtractorAbstractClass(nn.Module):

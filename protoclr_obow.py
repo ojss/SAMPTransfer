@@ -2,6 +2,7 @@ __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
 import math
+from typing import Optional
 
 import numpy as np
 import pytorch_lightning as pl
@@ -20,6 +21,7 @@ from dataloaders import UnlabelledDataModule
 from proto_utils import (Encoder4L,
                          get_prototypes,
                          prototypical_loss)
+from jsonargparse import lazy_instance
 
 
 def expand_target(target, prediction):
@@ -65,16 +67,17 @@ class PCLROBoW(pl.LightningModule):
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 bow_levels,
-                 bow_extractor_opts_list,
-                 bow_predictor_opts,
+                 feature_extractor: Encoder4L,
+                 bow_levels: list,
+                 bow_extractor_opts: dict,
+                 bow_predictor_opts: dict,
                  alpha=.99,
                  num_classes=None,
                  dataset='omniglot',
                  num_channels=64,  # number of output channels
-                 feature_extractor=Encoder4L(3, 64, 64),
                  lr=1e-3,
                  inner_lr=1e-3,
+                 cosine_sch=True,
                  distance='euclidean',
                  mode='trainval',
                  eval_ways=5,
@@ -85,17 +88,20 @@ class PCLROBoW(pl.LightningModule):
                  finetune_batch_norm=False):
         super().__init__()
         assert isinstance(bow_levels, (list, tuple))
+
+        bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
+            'bow_extractor_opts_list']
+
         assert isinstance(bow_extractor_opts_list, (list, tuple))
         assert len(bow_extractor_opts_list) == len(bow_levels)
 
         self._bow_levels = bow_levels
         self._num_bow_levels = len(bow_levels)
-        if isinstance(alpha, (tuple, list)):
+        if cosine_sch is True:
             # Use cosine schedule in order to increase the alpha from
             # alpha_base (e.g., 0.99) to 1.0.
-            alpha_base, num_iterations = alpha
+            alpha_base = alpha
             self._alpha_base = alpha_base
-            self._num_iterations = num_iterations
             self.register_buffer("_alpha", torch.FloatTensor(1).fill_(alpha_base))
             self.register_buffer("_iteration", torch.zeros(1))
             self._alpha_cosine_schedule = True
@@ -152,10 +158,15 @@ class PCLROBoW(pl.LightningModule):
         self.ft_freeze_backbone = ft_freeze_backbone
         self.finetune_batch_norm = finetune_batch_norm
 
+        self.num_channels = num_channels
         # self.example_input_array = [batch_size, 1, 28, 28] if dataset == 'omniglot'\
         #     else [batch_size, 3, 84, 84]
 
         self.automatic_optimization = False
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        if stage == "fit":
+            self._num_iterations = len(self.trainer.datamodule.train_dataloader()) * self.trainer.max_epochs
 
     @torch.no_grad()
     def _get_momentum_alpha(self):
@@ -233,7 +244,8 @@ class PCLROBoW(pl.LightningModule):
         return {'optimizer': opt, 'lr_scheduler': sch}
 
     def forward(self, x):
-        z = self.encoder(x.view(-1, *x.shape[-3:]))
+        # TODO: implement new forward func
+        z = self.feature_extractor(x.view(-1, *x.shape[-3:]))
         embeddings = nn.Flatten()(z)
         return embeddings.view(*x.shape[:-3], -1)
 
@@ -255,6 +267,7 @@ class PCLROBoW(pl.LightningModule):
         return loss, accuracy
 
     def training_step(self, batch, batch_idx):
+        breakpoint()
         opt = self.optimizers()
         sch = self.lr_schedulers()
 
@@ -288,6 +301,7 @@ class PCLROBoW(pl.LightningModule):
 
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
+        breakpoint()
         x = torch.cat([x_support, x_query], 1)
         z = self.forward(x)
 
@@ -432,13 +446,14 @@ class PCLROBoW(pl.LightningModule):
                                            distance=self.distance)
         return loss, accuracy
 
+    # TODO: check if validation is to be done with teacher or student
     def validation_step(self, batch, batch_idx):
         loss = 0.
         accuracy = 0.
-        original_encoder_state = copy.deepcopy(self.encoder.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
 
         if self.sup_finetune:
-            loss, accuracy = self.supervised_finetuning(self.encoder,
+            loss, accuracy = self.supervised_finetuning(self.feature_extractor,
                                                         episode=batch,
                                                         inner_lr=self.sup_finetune_lr,
                                                         total_epoch=self.sup_finetune_epochs,
@@ -446,7 +461,7 @@ class PCLROBoW(pl.LightningModule):
                                                         finetune_batch_norm=self.finetune_batch_norm,
                                                         device=self.device,
                                                         n_way=self.eval_ways)
-            self.encoder.load_state_dict(original_encoder_state)
+            self.feature_extractor.load_state_dict(original_encoder_state)
         elif not self.sup_finetune:
             with torch.no_grad():
                 loss, accuracy = self.std_proto_form(batch, batch_idx)
@@ -459,10 +474,10 @@ class PCLROBoW(pl.LightningModule):
         return loss.item(), accuracy
 
     def test_step(self, batch, batch_idx):
-        original_encoder_state = copy.deepcopy(self.encoder.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
         if self.sup_finetune:
             loss, accuracy = self.supervised_finetuning(
-                self.encoder,
+                self.feature_extractor,
                 episode=batch,
                 inner_lr=self.sup_finetune_lr,
                 total_epoch=self.sup_finetune_epochs,
@@ -471,7 +486,7 @@ class PCLROBoW(pl.LightningModule):
                 n_way=self.eval_ways,
             )
             torch.cuda.empty_cache()
-            self.encoder.load_state_dict(original_encoder_state)
+            self.feature_extractor.load_state_dict(original_encoder_state)
         else:
             # Note: this is just using the standard protonet form
             with torch.no_grad():
@@ -494,6 +509,48 @@ class PCLROBoW(pl.LightningModule):
             logger=True,
         )
         return loss.item(), accuracy
+
+    def bow_opts_converter(self, bow_extractor_opts, bow_levels, num_channels):
+        model_opts = {}
+        bow_extractor_opts = bow_extractor_opts
+        num_words = bow_extractor_opts["num_words"]
+        inv_delta = bow_extractor_opts["inv_delta"]
+        bow_levels = bow_levels
+        num_bow_levels = len(bow_levels)
+        if not isinstance(inv_delta, (list, tuple)):
+            inv_delta = [inv_delta for _ in range(num_bow_levels)]
+        if not isinstance(num_words, (list, tuple)):
+            num_words = [num_words for _ in range(num_bow_levels)]
+
+        bow_extractor_opts_list = []
+        for i in range(num_bow_levels):
+            bow_extr_this = copy.deepcopy(bow_extractor_opts)
+            if isinstance(bow_extr_this["inv_delta"], (list, tuple)):
+                bow_extr_this["inv_delta"] = bow_extr_this["inv_delta"][i]
+            if isinstance(bow_extr_this["num_words"], (list, tuple)):
+                bow_extr_this["num_words"] = bow_extr_this["num_words"][i]
+            bow_extr_this["num_channels"] = num_channels // (2 ** (num_bow_levels - 1 - i))
+            bow_extractor_opts_list.append(bow_extr_this)
+
+        model_opts["bow_extractor_opts_list"] = bow_extractor_opts_list
+
+        return model_opts
+
+
+class MyCLI(LightningCLI):
+    def add_arguments_to_parser(self, parser: pl.utilities.cli.LightningArgumentParser):
+        # DEFAULTS
+        parser.set_defaults({"model.feature_extractor": lazy_instance(Encoder4L, 3, 64, 64)})
+
+        parser.link_arguments("data.dataset", "model.dataset")
+        parser.link_arguments("data.batch_size", "model.batch_size")
+        parser.link_arguments("data.n_support", "model.n_support")
+        parser.link_arguments("data.n_query", "model.n_query")
+
+        parser.add_argument("bow_extractor_opts.inv_delta", default=15)
+        parser.add_argument("bow_extractor_opts.num_words", default=8192)
+
+        parser.add_argument("bow_predictor_opts.kappa", default=8)
 
 
 def cli_main():
