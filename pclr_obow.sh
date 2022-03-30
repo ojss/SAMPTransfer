@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a40:1
 # You can control the resources and scheduling with '#SBATCH' settings
 # (see 'man sbatch' for more information on setting these parameters)
 
@@ -11,7 +11,7 @@
 #SBATCH --qos=medium
 
 # The default run (wall-clock) time is 1 minute
-#SBATCH --time=02-02:00:00
+#SBATCH --time=00-08:00:00
 
 # The default number of parallel tasks per job is 1
 #SBATCH --ntasks=1

@@ -543,10 +543,10 @@ class PCLROBoW(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = 0.
         accuracy = 0.
-        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor_teacher.state_dict())
 
         if self.sup_finetune:
-            loss, accuracy = self.supervised_finetuning(self.feature_extractor,
+            loss, accuracy = self.supervised_finetuning(self.feature_extractor_teacher,
                                                         episode=batch,
                                                         inner_lr=self.sup_finetune_lr,
                                                         total_epoch=self.sup_finetune_epochs,
@@ -567,10 +567,10 @@ class PCLROBoW(pl.LightningModule):
         return loss.item(), accuracy
 
     def test_step(self, batch, batch_idx):
-        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor_teacher.state_dict())
         if self.sup_finetune:
             loss, accuracy = self.supervised_finetuning(
-                self.feature_extractor,
+                self.feature_extractor_teacher,
                 episode=batch,
                 inner_lr=self.sup_finetune_lr,
                 total_epoch=self.sup_finetune_epochs,
