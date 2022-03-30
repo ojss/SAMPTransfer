@@ -43,7 +43,7 @@ trainer:
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
-      name: ${env:SLURM_JOB_ID}
+      #name: ${env:SLURM_JOB_ID}
       project: PCLR-OboW
       save_dir: wandb_logs
       log_model: True
