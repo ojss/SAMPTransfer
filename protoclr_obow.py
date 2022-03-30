@@ -282,8 +282,10 @@ class PCLROBoW(pl.LightningModule):
     def configure_optimizers(self):
         parameters = filter(lambda p: p.requires_grad, self.parameters())
         opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
-        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
-        return {'optimizer': opt, 'lr_scheduler': sch}
+        # sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
+        sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
+        # return {'optimizer': opt, 'lr_scheduler': sch}
+        return {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
 
     def forward(self, x, x_prime, labels=None):
         """ Applies the OBoW self-supervised task to a mini-batch of images.

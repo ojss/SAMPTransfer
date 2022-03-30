@@ -1,5 +1,7 @@
 model:
-  lr: 0.05
+  lr: 1e-3
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
   weight_decay: 5e-4
   alpha_cosine: True
   bow_levels: [ "block4", ]
