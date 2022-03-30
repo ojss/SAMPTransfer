@@ -49,7 +49,7 @@ trainer:
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
-        monitor: "train_accuracy"
+        monitor: "val_accuracy"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
