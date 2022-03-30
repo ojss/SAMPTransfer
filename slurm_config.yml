@@ -59,11 +59,11 @@ data:
   dataset: "miniimagenet"
   #  datapath: ../data/
   datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/miniimagenet
-#  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  #  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 0
+  num_workers: 6
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 60, 60 ]
   no_aug_support: True
