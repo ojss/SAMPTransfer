@@ -11,6 +11,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.cli import LightningCLI
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
@@ -674,6 +675,7 @@ def cli_main():
     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False, save_config_overwrite=True,
                 parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model, cli.datamodule)
+    cli.trainer.test(dm=cli.datamodule)
 
 
 if __name__ == "__main__":

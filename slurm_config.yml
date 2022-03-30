@@ -1,10 +1,11 @@
 model:
+  lr: 0.05
   weight_decay: 5e-4
   alpha_cosine: True
   bow_levels: [ "block4", ]
   bow_extractor_opts:
-    inv_delta: 15
-    num_words: 3200
+    inv_delta: 10
+    num_words: 8192
   bow_predictor_opts:
     kappa: 5
   alpha: 0.99
