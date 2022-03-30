@@ -5,6 +5,7 @@ from bow.feature_extractor import CNN_4Layer
 from protoclr_obow import PCLROBoW
 from dataloaders import UnlabelledDataModule
 import pytorch_lightning as pl
+from callbacks import ConfidenceIntervalCallback
 
 
 def cli_main():
@@ -25,6 +26,7 @@ def cli_main():
     trainer = pl.Trainer(
         # gpus=-1,
         limit_test_batches=600,
+        callbacks=[ConfidenceIntervalCallback(log_to_wb=False)]
     )
     trainer.test(model=model, datamodule=datamodule)
 
