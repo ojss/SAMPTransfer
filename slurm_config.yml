@@ -34,7 +34,7 @@ trainer:
   gpus: -1
   num_sanity_val_steps: 0
   fast_dev_run: 0
-  max_epochs: 1500
+  max_epochs: 2500
   limit_train_batches: 100
   limit_val_batches: 15
   callbacks:
@@ -49,7 +49,7 @@ trainer:
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
-        monitor: "train_accuracy"
+        monitor: "val_accuracy"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
