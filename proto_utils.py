@@ -262,6 +262,7 @@ class CAE(nn.Module):
 class Encoder4L(nn.Module):
     def __init__(self, in_channels=1, hidden_size=64, out_channels=64):
         super().__init__()
+        self.num_channels = out_channels
 
         self.encoder = nn.Sequential(
             # nn.ZeroPad2d(conv_padding),

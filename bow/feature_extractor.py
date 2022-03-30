@@ -280,14 +280,58 @@ class ResNet(SequentialFeatureExtractorAbstractClass):
         self.num_channels = net.fc.in_features
 
 
+def conv3x3(in_channels, out_channels, return_indices=False, **kwargs):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, **kwargs),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(),
+        nn.MaxPool2d(2) if return_indices == False else nn.MaxPool2d(2, return_indices=True)
+    )
+
+
+class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
+    def __init__(self, in_channels, out_channels=64, hidden_size=64, global_pooling=True):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.hidden_size = hidden_size
+        all_feat_names = []
+        feature_blocks = []
+
+        feature_blocks.append(conv3x3(in_channels, hidden_size))
+        all_feat_names.append('block1')
+
+        feature_blocks.append(conv3x3(hidden_size, hidden_size))
+        all_feat_names.append('block2')
+
+        feature_blocks.append(conv3x3(hidden_size, hidden_size))
+        all_feat_names.append('block3')
+
+        feature_blocks.append(conv3x3(hidden_size, out_channels))
+        all_feat_names.append('block4')
+
+        if global_pooling:
+            feature_blocks.append(utils.GlobalPooling(type='avg'))
+            all_feat_names.append('GlobalPooling')
+        super(CNN_4Layer, self).__init__(all_feat_names, feature_blocks)
+        self.num_channels = out_channels
+
+    # def forward(self, inputs):
+    #     # embeddings = self.encoder(inputs.view(-1, *inputs.shape[-3:]))
+    #     # return embeddings.view(*inputs.shape[:-3], -1)
+    #     return self.encoder(inputs)
+
+
 def FeatureExtractor(arch, opts):
     all_architectures = (
         'wrn', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
         'resnext101_32x8d', 'resnext50_32x4d', 'wide_resnet101_2',
-        'wide_resnet50_2')
+        'wide_resnet50_2', 'conv4')
 
     assert arch in all_architectures
-    if arch == 'wrn':
+    if arch == 'conv4':
+        conv4 = CNN_4Layer(in_channels=3)
+        return conv4, conv4.num_channels
+    elif arch == 'wrn':
         num_channels = opts["widen_factor"] * 64
         return WideResNet(**opts), num_channels
     else:

@@ -104,7 +104,7 @@ def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
 class UnlabelledDataset(Dataset):
     def __init__(self, dataset, datapath, split, transform=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None,
-                 seed=10, no_aug_support=False, no_aug_query=False):
+                 seed=10, no_aug_support=False, no_aug_query=False, img_size_orig=(224, 224), img_size_crop=(84, 84)):
         """
         Args:
             dataset (string): Dataset name.
@@ -122,7 +122,8 @@ class UnlabelledDataset(Dataset):
         """
         self.n_support = n_support
         self.n_query = n_query
-        self.img_size = (28, 28) if dataset == 'omniglot' else (84, 84)
+        self.img_size_crop = (28, 28) if dataset == 'omniglot' else img_size_crop
+        self.img_size_orig = (28, 28) if dataset == 'omniglot' else img_size_orig
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
@@ -142,17 +143,17 @@ class UnlabelledDataset(Dataset):
         else:
             if self.dataset == 'cub':
                 self.transform = transforms.Compose([
-                    get_cub_default_transform(self.img_size),
-                    get_custom_transform(self.img_size)])
+                    get_cub_default_transform(self.img_size_crop),
+                    get_custom_transform(self.img_size_crop)])
                 self.original_transform = transforms.Compose([
-                    get_cub_default_transform(self.img_size),
+                    get_cub_default_transform(self.img_size_crop),
                     transforms.ToTensor()])
             elif self.dataset == 'omniglot':
                 self.transform = get_omniglot_transform((28, 28))
                 self.original_transform = identity_transform((28, 28))
             else:
-                self.transform = get_custom_transform(self.img_size)
-                self.original_transform = identity_transform(self.img_size)
+                self.transform = get_custom_transform(self.img_size_crop)
+                self.original_transform = identity_transform(self.img_size_orig)
 
     def _extract_data_from_hdf5(self, dataset, datapath, split,
                                 n_classes, seed):
@@ -193,13 +194,13 @@ class UnlabelledDataset(Dataset):
             image = Image.fromarray(self.data[index])
 
         view_list = []
-
+        originals = []
         for _ in range(self.n_support):
             if not self.no_aug_support:
-                view_list.append(self.transform(image).unsqueeze(0))
+                originals.append(self.transform(image).unsqueeze(0))
             else:
                 assert self.n_support == 1
-                view_list.append(self.original_transform(image).unsqueeze(0))
+                originals.append(self.original_transform(image).unsqueeze(0))
 
         for _ in range(self.n_query):
             if not self.no_aug_query:
@@ -208,7 +209,7 @@ class UnlabelledDataset(Dataset):
                 assert self.n_query == 1
                 view_list.append(self.original_transform(image).unsqueeze(0))
 
-        return dict(data=torch.cat(view_list))
+        return dict(origs=torch.cat(originals), views=torch.cat(view_list))
 
 
 # Cell
@@ -269,14 +270,16 @@ class UnlabelledDataModule(pl.LightningDataModule):
     def __init__(self, dataset, datapath, split, transform=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None, batch_size=50, num_workers=8,
                  seed=10, no_aug_support=False, no_aug_query=False, merge_train_val=True, mode='val',
-                 eval_ways=5, eval_support_shots=5, eval_query_shots=15, **kwargs):
+                 eval_ways=5, eval_support_shots=5, eval_query_shots=15, img_size_orig=(224, 224),
+                 img_size_crop=(84, 84), **kwargs):
         super().__init__()
 
         self.n_images = n_images
         self.n_support = n_support
         self.n_query = n_query
         self.n_classes = n_classes
-        self.img_size = (28, 28) if dataset == 'omniglot' else (84, 84)
+        self.img_size_orig = (28, 28) if dataset == "omniglot" else img_size_orig
+        self.img_size = (28, 28) if dataset == 'omniglot' else img_size_crop
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
 
@@ -306,14 +309,16 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                                n_support=self.n_support,
                                                n_query=self.n_query,
                                                no_aug_support=self.no_aug_support,
-                                               no_aug_query=self.no_aug_query)
+                                               no_aug_query=self.no_aug_query,
+                                               img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
         if self.merge_train_val:
             dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
                                             transform=None,
                                             n_support=self.n_support,
                                             n_query=self.n_query,
                                             no_aug_support=self.no_aug_support,
-                                            no_aug_query=self.no_aug_query)
+                                            no_aug_query=self.no_aug_query,
+                                            img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
 
             self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
 

@@ -1,17 +1,23 @@
 model:
-  bow_levels: ["block3", "block4"]
+  weight_decay: 5e-4
+  alpha_cosine: True
+  bow_levels: [ "block4", ]
   bow_extractor_opts:
     inv_delta: 15
-    num_words: 8192
+    num_words: 3200
   bow_predictor_opts:
-    kappa: 8
+    kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: proto_utils.Encoder4L
+    class_path: bow.feature_extractor.CNN_4Layer
     init_args:
       in_channels: 3
       hidden_size: 64
       out_channels: 64
+#    class_path: bow.feature_extractor.ResNet
+#    init_args:
+#      arch: resnet18
+#      global_pooling: True
 #optim:
 #  optim_type: "sgd"
 #  momentum: 0.9
@@ -25,9 +31,31 @@ model:
 #  permanent: 10 # save a permanent checkpoint every 10 epochs.
 
 trainer:
+  gpus: -1
   num_sanity_val_steps: 0
+  fast_dev_run: 0
+  max_epochs: 1500
+  limit_train_batches: 100
+  limit_val_batches: 15
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        patience: 200
+        monitor: "train_accuracy"
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
 
 data:
   dataset: "miniimagenet"
-  datapath: ../data/
-  batch_size: 50
+  #  datapath: ../data/
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/miniimagenet
+#  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  n_support: 1
+  n_query: 3
+  batch_size: 64
+  num_workers: 0
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 60, 60 ]
+  no_aug_support: True

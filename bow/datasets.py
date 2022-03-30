@@ -1350,3 +1350,5 @@ def get_data_loaders_linear_classification_precache(
     return (
         loader_train, sampler_train, dataset_train,
         loader_test, sampler_test, dataset_test)
+
+import pytorch_lightning as pl

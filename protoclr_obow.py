@@ -10,18 +10,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.utilities.cli import LightningCLI
+from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from torch.autograd import Variable
 from tqdm.auto import tqdm
 
 import bow.bow_utils as utils
+import bow.datasets
 from bow.bow_extractor import BoWExtractorMultipleLevels
 from bow.bowpredictor import BoWPredictor
 from bow.classification import PredictionHead
+from bow.feature_extractor import ResNet
 from dataloaders import UnlabelledDataModule
 from proto_utils import (Encoder4L,
                          get_prototypes,
                          prototypical_loss)
 from jsonargparse import lazy_instance
+
+
+@torch.no_grad()
+def compute_bow_perplexity(bow_target):
+    """ Compute the per image and per batch perplexity of the bow_targets. """
+    assert isinstance(bow_target, (list, tuple))
+
+    perplexity_batch, perplexity_img = [], []
+    for bow_target_level in bow_target:  # For each bow level.
+        assert bow_target_level.dim() == 2
+        # shape of bow_target_level: [batch_size x num_words]
+
+        probs = F.normalize(bow_target_level, p=1, dim=1)
+        perplexity_img_level = torch.exp(
+            -torch.sum(probs * torch.log(probs + 1e-5), dim=1)).mean()
+
+        bow_target_sum_all = bow_target_level.sum(dim=0)
+        # Uncomment the following line if you want to compute the perplexity of
+        # of the entire batch in case of distributed training.
+        # bow_target_sum_all = utils.reduce_all(bow_target_sum_all)
+        probs = F.normalize(bow_target_sum_all, p=1, dim=0)
+        perplexity_batch_level = torch.exp(
+            -torch.sum(probs * torch.log(probs + 1e-5), dim=0))
+
+        perplexity_img.append(perplexity_img_level)
+        perplexity_batch.append(perplexity_batch_level)
+
+    perplexity_batch = torch.stack(perplexity_batch, dim=0).view(-1).tolist()
+    perplexity_img = torch.stack(perplexity_img, dim=0).view(-1).tolist()
+
+    return perplexity_batch, perplexity_img
 
 
 def expand_target(target, prediction):
@@ -67,7 +101,7 @@ class PCLROBoW(pl.LightningModule):
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 feature_extractor: Encoder4L,
+                 feature_extractor: nn.Module,
                  bow_levels: list,
                  bow_extractor_opts: dict,
                  bow_predictor_opts: dict,
@@ -75,9 +109,10 @@ class PCLROBoW(pl.LightningModule):
                  num_classes=None,
                  dataset='omniglot',
                  num_channels=64,  # number of output channels
+                 weight_decay=0.01,
                  lr=1e-3,
                  inner_lr=1e-3,
-                 cosine_sch=True,
+                 alpha_cosine=True,
                  distance='euclidean',
                  mode='trainval',
                  eval_ways=5,
@@ -88,6 +123,8 @@ class PCLROBoW(pl.LightningModule):
                  finetune_batch_norm=False):
         super().__init__()
         assert isinstance(bow_levels, (list, tuple))
+        # if isinstance(feature_extractor, ResNet):
+        num_channels = feature_extractor.num_channels
 
         bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
             'bow_extractor_opts_list']
@@ -97,7 +134,7 @@ class PCLROBoW(pl.LightningModule):
 
         self._bow_levels = bow_levels
         self._num_bow_levels = len(bow_levels)
-        if cosine_sch is True:
+        if alpha_cosine is True:
             # Use cosine schedule in order to increase the alpha from
             # alpha_base (e.g., 0.99) to 1.0.
             alpha_base = alpha
@@ -142,9 +179,7 @@ class PCLROBoW(pl.LightningModule):
 
         self.distance = distance
 
-        # gamma will be used to weight the values of the MSE loss to potentially bring it up to par
-        # gamma can also be adaptive in the future
-
+        self.weight_decay = weight_decay
         self.lr = lr
         self.lr_decay_rate = lr_decay_rate
         self.lr_decay_step = lr_decay_step
@@ -162,10 +197,12 @@ class PCLROBoW(pl.LightningModule):
         # self.example_input_array = [batch_size, 1, 28, 28] if dataset == 'omniglot'\
         #     else [batch_size, 3, 84, 84]
 
-        self.automatic_optimization = False
+        self.automatic_optimization = True
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == "fit":
+            # try:
+            # self._num_iterations = len(self.train_dataloader()) * self.trainer.max_epochs
             self._num_iterations = len(self.trainer.datamodule.train_dataloader()) * self.trainer.max_epochs
 
     @torch.no_grad()
@@ -223,6 +260,7 @@ class PCLROBoW(pl.LightningModule):
         return loss, accuracy
 
     def generate_bow_targets(self, image):
+        # TODO: see if this can be updated for Conv-4 -> what levels to go for?
         features = self.feature_extractor_teacher(image, self._bow_levels)
         if isinstance(features, torch.Tensor):
             features = [features, ]
@@ -238,24 +276,77 @@ class PCLROBoW(pl.LightningModule):
         return loss_cls, accuracy
 
     def configure_optimizers(self):
-        opt = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=.01)
-        sch = torch.optim.lr_scheduler.StepLR(
-            opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
+        parameters = filter(lambda p: p.requires_grad, self.parameters())
+        opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
         return {'optimizer': opt, 'lr_scheduler': sch}
 
-    def forward(self, x):
+    def forward(self, x, x_prime, labels=None):
+        """ Applies the OBoW self-supervised task to a mini-batch of images.
+
+        Args:
+        x: 4D tensor with shape [batch_size x 3 x img_height x img_width]
+            with the mini-batch of images from which the teacher network
+            generates the BoW targets.
+        x_prime: list of 4D tensors where each of them is a mini-batch of
+            image crops with shape [(batch_size * num_crops) x 3 x crop_height x crop_width]
+            from which the student network predicts the BoW targets. For
+            example, in the full version of OBoW this list will include a
+            [(batch_size * 2) x 3 x 160 x 160]-shaped tensor with two image crops
+            of size [160 x 160] pixels and a [(batch_size * 5) x 3 x 96 x 96]-
+            shaped tensor with five image patches of size [96 x 96] pixels.
+        labels: (optional) 1D tensor with shape [batch_size] with the class
+            labels of the img_orig images. If available, it would be used for
+            on-line monitoring the performance of the linear classifier.
+
+        Returns:
+        losses: a tensor with the losses for each type of image crop and
+            (optionally) the loss of the linear classifier.
+        logs: a list of metrics for monitoring the training progress. It
+            includes the perplexity of the bow targets in a mini-batch
+            (perp_b), the perplexity of the bow targets in an image (perp_i),
+            and (optionally) the accuracy of a linear classifier on-line
+            trained on the teacher features (this is a proxy for monitoring
+            during training the quality of the learned features; Note, at the
+            end the features that are used are those of the student).
+        """
         # TODO: implement new forward func
-        z = self.feature_extractor(x.view(-1, *x.shape[-3:]))
-        embeddings = nn.Flatten()(z)
-        return embeddings.view(*x.shape[:-3], -1)
+        if self.training is False:
+            return
+
+        ###### MAKE BOW PREDICTIONS ######
+        dictionary = self.bow_extractor.get_dictionary()
+        features = [self.feature_extractor(crop) for crop in x_prime]
+        bow_predictions = self.bow_predictor(features, dictionary)
+
+        ###### COMPUTE BOW TARGETS ######
+        with torch.no_grad():
+            self._update_teacher()
+            bow_target, features_t = self.generate_bow_targets(x)
+            perp_b, perp_i = compute_bow_perplexity(bow_target)
+
+        ######## COMPUTE BOW PREDICTION LOSSES #######
+        losses = [self._bow_loss(pred, bow_target) for pred in bow_predictions]
+
+        # TODO: add classification loss later on
+        losses = torch.stack(losses, dim=0).view(-1)
+        logs = list(perp_b + perp_i)
+
+        features_o_stu = self.feature_extractor(x)
+
+        # z = self.feature_extractor(x.view(-1, *x.shape[-3:]))
+        # embeddings = nn.Flatten()(z)
+        # return embeddings.view(*x.shape[:-3], -1), losses, logs
+
+        return losses, logs, torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways):
 
         #
         # e.g. [1,50*n_support,*(3,84,84)]
-        z_support = z[:, :ways * self.n_support]
+        z_support = z[:ways * self.n_support, :].unsqueeze(0)
         # e.g. [1,50*n_query,*(3,84,84)]
-        z_query = z[:, ways * self.n_support:]
+        z_query = z[ways * self.n_support:, :].unsqueeze(0)
         # Get prototypes
         if self.n_support == 1:
             z_proto = z_support  # in 1-shot the prototypes are the support samples
@@ -267,26 +358,30 @@ class PCLROBoW(pl.LightningModule):
         return loss, accuracy
 
     def training_step(self, batch, batch_idx):
-        breakpoint()
         opt = self.optimizers()
         sch = self.lr_schedulers()
 
         # [batch_size x ways x shots x image_dim]
-        data = batch['data'].to(self.device)
+        # data = batch['data'].to(self.device)
+        data = batch['origs']
+        views = batch['views']
         data = data.unsqueeze(0)
         # e.g. 50 images, 2 support, 2 query, miniImageNet: torch.Size([1, 50, 4, 3, 84, 84])
         batch_size = data.size(0)
         ways = data.size(1)
 
         # Divide into support and query shots
-        x_support = data[:, :, :self.n_support]
+        # x_support = data[:, :, :self.n_support]
         # e.g. [1,50*n_support,*(3,84,84)]
-        x_support = x_support.reshape(
-            (batch_size, ways * self.n_support, *x_support.shape[-3:]))
-        x_query = data[:, :, self.n_support:]
+        x_support = data.reshape(
+            (batch_size, ways * self.n_support, *data.shape[-3:])).squeeze(0)
+        x_query = views.reshape(
+            (ways * self.n_query, *views.shape[-3:])
+        )
+        # x_query = data[:, :, self.n_support:].squeeze(0)
         # e.g. [1,50*n_query,*(3,84,84)]
-        x_query = x_query.reshape(
-            (batch_size, ways * self.n_query, *x_query.shape[-3:]))
+        # x_query = x_query.reshape(
+        #     (batch_size, ways * self.n_query, *x_query.shape[-3:]))
 
         # Create dummy query labels
         y_query = torch.arange(ways).unsqueeze(
@@ -301,30 +396,28 @@ class PCLROBoW(pl.LightningModule):
 
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
-        breakpoint()
-        x = torch.cat([x_support, x_query], 1)
-        z = self.forward(x)
-
-        opt.zero_grad()
-
-        loss, accuracy = self.calculate_protoclr_loss(
+        # x = torch.cat([x_support, x_query], 1)
+        losses, logs, z = self.forward(x_support, [x_query])
+        loss = losses.sum()
+        self.log("bow_loss", loss.item(), prog_bar=True)
+        clr_loss, accuracy = self.calculate_protoclr_loss(
             z, y_support, y_query, ways)
+        self.log('clr_loss', clr_loss.item(), prog_bar=True)
 
-        self.log('clr_loss', loss.item(), prog_bar=True)
-        # adding the pixelwise reconstruction loss at the end
-        # it has been broadcasted such that each support source image is broadcasted thrice over the three
-        # query set images - which are the augmentations of the support image
+        loss += clr_loss
 
-        self.manual_backward(loss)
-        opt.step()
-        sch.step()
+        # opt.zero_grad()
+
+        # self.manual_backward(loss)
+        # opt.step()
+        # sch.step()
 
         self.log_dict({
             'loss': loss.item(),
             'train_accuracy': accuracy
         }, prog_bar=True)
 
-        return loss, accuracy
+        return {"loss": loss, "accuracy": accuracy}
 
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
@@ -536,11 +629,32 @@ class PCLROBoW(pl.LightningModule):
 
         return model_opts
 
+    # def train_dataloader(self):
+    #     train_loader, train_sampler, _, test_loader, _, _ = bow.datasets.get_data_loaders_for_OBoW(
+    #         dataset_name="ImageNet",
+    #         batch_size=8,
+    #         workers=0,
+    #         distributed=False,
+    #         epoch_size=None,
+    #         data_dir="~/projects/data/imagenette2/")
+    #     return train_loader
+    #
+    # def val_dataloader(self):
+    #     train_loader, train_sampler, _, test_loader, _, _ = bow.datasets.get_data_loaders_for_OBoW(
+    #         dataset_name="ImageNet",
+    #         batch_size=8,
+    #         workers=0,
+    #         distributed=False,
+    #         epoch_size=None,
+    #         data_dir="~/projects/data/imagenette2/")
+    #     return test_loader
+
 
 class MyCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: pl.utilities.cli.LightningArgumentParser):
         # DEFAULTS
-        parser.set_defaults({"model.feature_extractor": lazy_instance(Encoder4L, 3, 64, 64)})
+        parser.set_defaults(
+            {"model.feature_extractor": lazy_instance(Encoder4L, in_channels=3, hidden_size=64, out_channels=64)})
 
         parser.link_arguments("data.dataset", "model.dataset")
         parser.link_arguments("data.batch_size", "model.batch_size")
@@ -554,7 +668,7 @@ class MyCLI(LightningCLI):
 
 
 def cli_main():
-    cli = LightningCLI(PCLROBoW, UnlabelledDataModule, run=False)
+    cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False)
     cli.trainer.fit(cli.model, cli.datamodule)
 
 
