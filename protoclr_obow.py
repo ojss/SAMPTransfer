@@ -554,7 +554,7 @@ class PCLROBoW(pl.LightningModule):
                                                         finetune_batch_norm=self.finetune_batch_norm,
                                                         device=self.device,
                                                         n_way=self.eval_ways)
-            self.feature_extractor.load_state_dict(original_encoder_state)
+            self.feature_extractor_teacher.load_state_dict(original_encoder_state)
         elif not self.sup_finetune:
             with torch.no_grad():
                 loss, accuracy = self.std_proto_form(batch, batch_idx)
@@ -579,7 +579,7 @@ class PCLROBoW(pl.LightningModule):
                 n_way=self.eval_ways,
             )
             torch.cuda.empty_cache()
-            self.feature_extractor.load_state_dict(original_encoder_state)
+            self.feature_extractor_teacher.load_state_dict(original_encoder_state)
         else:
             # Note: this is just using the standard protonet form
             with torch.no_grad():
