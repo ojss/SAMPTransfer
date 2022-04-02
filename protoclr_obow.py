@@ -1,34 +1,28 @@
 __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
-import os
-
-import math
 from typing import Optional
 
+import math
 import numpy as np
+import pl_bolts.optimizers
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
-from pytorch_lightning.loggers import WandbLogger
+from jsonargparse import lazy_instance
 from pytorch_lightning.utilities.cli import LightningCLI
-from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from torch.autograd import Variable
 from tqdm.auto import tqdm
 
 import bow.bow_utils as utils
-import bow.datasets
 from bow.bow_extractor import BoWExtractorMultipleLevels
 from bow.bowpredictor import BoWPredictor
 from bow.classification import PredictionHead
-from bow.feature_extractor import ResNet
 from dataloaders import UnlabelledDataModule
 from proto_utils import (Encoder4L,
                          get_prototypes,
                          prototypical_loss)
-from jsonargparse import lazy_instance
 
 
 @torch.no_grad()
@@ -281,9 +275,15 @@ class PCLROBoW(pl.LightningModule):
         return loss_cls, accuracy
 
     def configure_optimizers(self):
+        # TODO: make this bit configurable
         parameters = filter(lambda p: p.requires_grad, self.parameters())
-        opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
-        sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
+        opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
+        # sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
+        sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
+                                                                warmup_epochs=10,
+                                                                max_epochs=self.trainer.max_epochs,
+                                                                warmup_start_lr=0.01,
+                                                                eta_min=3e-5)
         # sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
         return {'optimizer': opt, 'lr_scheduler': sch}
         # return {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
@@ -365,9 +365,6 @@ class PCLROBoW(pl.LightningModule):
         return loss, accuracy
 
     def training_step(self, batch, batch_idx):
-        opt = self.optimizers()
-        sch = self.lr_schedulers()
-
         # [batch_size x ways x shots x image_dim]
         # data = batch['data'].to(self.device)
         data = batch['origs']
@@ -550,10 +547,10 @@ class PCLROBoW(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = 0.
         accuracy = 0.
-        original_encoder_state = copy.deepcopy(self.feature_extractor_teacher.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
 
         if self.sup_finetune:
-            loss, accuracy = self.supervised_finetuning(self.feature_extractor_teacher,
+            loss, accuracy = self.supervised_finetuning(self.feature_extractor,
                                                         episode=batch,
                                                         inner_lr=self.sup_finetune_lr,
                                                         total_epoch=self.sup_finetune_epochs,
@@ -561,7 +558,7 @@ class PCLROBoW(pl.LightningModule):
                                                         finetune_batch_norm=self.finetune_batch_norm,
                                                         device=self.device,
                                                         n_way=self.eval_ways)
-            self.feature_extractor_teacher.load_state_dict(original_encoder_state)
+            self.feature_extractor.load_state_dict(original_encoder_state)
         elif not self.sup_finetune:
             with torch.no_grad():
                 loss, accuracy = self.std_proto_form(batch, batch_idx)
@@ -574,10 +571,10 @@ class PCLROBoW(pl.LightningModule):
         return loss.item(), accuracy
 
     def test_step(self, batch, batch_idx):
-        original_encoder_state = copy.deepcopy(self.feature_extractor_teacher.state_dict())
+        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
         if self.sup_finetune:
             loss, accuracy = self.supervised_finetuning(
-                self.feature_extractor_teacher,
+                self.feature_extractor,
                 episode=batch,
                 inner_lr=self.sup_finetune_lr,
                 total_epoch=self.sup_finetune_epochs,
@@ -586,7 +583,7 @@ class PCLROBoW(pl.LightningModule):
                 n_way=self.eval_ways,
             )
             torch.cuda.empty_cache()
-            self.feature_extractor_teacher.load_state_dict(original_encoder_state)
+            self.feature_extractor.load_state_dict(original_encoder_state)
         else:
             # Note: this is just using the standard protonet form
             with torch.no_grad():
