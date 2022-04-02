@@ -82,7 +82,7 @@ def get_prototypes(emb, targets, num_classes):
 
     batch_size, emb_size = emb.size(0), emb.size(-1)
 
-    num_samples = self.get_num_samples(targets, num_classes, dtype=emb.dtype)
+    num_samples = get_num_samples(targets, num_classes, dtype=emb.dtype)
     num_samples.unsqueeze_(-1)
     num_samples = torch.max(num_samples, torch.ones_like(num_samples))
 
