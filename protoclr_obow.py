@@ -19,6 +19,7 @@ import bow.bow_utils as utils
 from bow.bow_extractor import BoWExtractorMultipleLevels
 from bow.bowpredictor import BoWPredictor
 from bow.classification import PredictionHead
+from bow.feature_extractor import CNN_4Layer
 from dataloaders import UnlabelledDataModule
 from proto_utils import (Encoder4L,
                          get_prototypes,
@@ -128,6 +129,7 @@ class PCLROBoW(pl.LightningModule):
         assert isinstance(bow_levels, (list, tuple))
         # if isinstance(feature_extractor, ResNet):
         num_channels = feature_extractor.num_channels
+        self.feature_extractor = feature_extractor
 
         bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
             'bow_extractor_opts_list']
@@ -646,7 +648,9 @@ class PCLROBoW(pl.LightningModule):
                 bow_extr_this["inv_delta"] = bow_extr_this["inv_delta"][i]
             if isinstance(bow_extr_this["num_words"], (list, tuple)):
                 bow_extr_this["num_words"] = bow_extr_this["num_words"][i]
-            bow_extr_this["num_channels"] = num_channels // (2 ** (num_bow_levels - 1 - i))
+            bow_extr_this["num_channels"] = num_channels if isinstance(self.feature_extractor,
+                                                                       CNN_4Layer) else num_channels // (
+                        2 ** (num_bow_levels - 1 - i))
             bow_extractor_opts_list.append(bow_extr_this)
 
         model_opts["bow_extractor_opts_list"] = bow_extractor_opts_list
