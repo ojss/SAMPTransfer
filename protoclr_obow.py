@@ -574,8 +574,8 @@ class PCLROBoW(pl.LightningModule):
         original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
         if self.sup_finetune:
             loss, accuracy = self.supervised_finetuning(
-                self.feature_extractor,
-                episode=batch,
+                self.feature_extractor.to(self.device),
+                episode=batch.to(self.device),
                 inner_lr=self.sup_finetune_lr,
                 total_epoch=self.sup_finetune_epochs,
                 freeze_backbone=self.ft_freeze_backbone,
