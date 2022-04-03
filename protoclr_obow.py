@@ -103,12 +103,17 @@ class PCLROBoW(pl.LightningModule):
                  bow_levels: list,
                  bow_extractor_opts: dict,
                  bow_predictor_opts: dict,
+                 optim: str = 'adam',
                  alpha=.99,
                  num_classes=None,
                  dataset='omniglot',
                  num_channels=64,  # number of output channels
                  weight_decay=0.01,
                  lr=1e-3,
+                 lr_sch='cos',
+                 warmup_epochs=10,
+                 warmup_start_lr=1e-3,
+                 eta_min=1e-5,
                  inner_lr=1e-3,
                  alpha_cosine=True,
                  distance='euclidean',
@@ -178,7 +183,12 @@ class PCLROBoW(pl.LightningModule):
         self.distance = distance
 
         self.weight_decay = weight_decay
+        self.optim = optim
         self.lr = lr
+        self.lr_sch = lr_sch
+        self.warmup_epochs = warmup_epochs
+        self.warmup_start_lr = warmup_start_lr
+        self.eta_min = eta_min
         self.lr_decay_rate = lr_decay_rate
         self.lr_decay_step = lr_decay_step
         self.inner_lr = inner_lr
@@ -277,16 +287,25 @@ class PCLROBoW(pl.LightningModule):
     def configure_optimizers(self):
         # TODO: make this bit configurable
         parameters = filter(lambda p: p.requires_grad, self.parameters())
-        opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
-        # sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
-        sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
-                                                                warmup_epochs=10,
-                                                                max_epochs=self.trainer.max_epochs,
-                                                                warmup_start_lr=0.01,
-                                                                eta_min=3e-5)
-        # sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
-        return {'optimizer': opt, 'lr_scheduler': sch}
-        # return {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        if self.optim == 'sgd':
+            opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
+        elif self.optim == 'adam':
+            opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+
+        if self.lr_sch == 'cos':
+            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
+            ret = {'optimizer': opt, 'lr_scheduler': sch}
+        elif self.lr_sch == 'cos_warmup':
+            sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
+                                                                    warmup_epochs=self.warmup_epochs,
+                                                                    max_epochs=self.trainer.max_epochs,
+                                                                    warmup_start_lr=self.warmup_start_lr,
+                                                                    eta_min=self.eta_min)
+            ret = {'optimizer': opt, 'lr_scheduler': sch}
+        elif self.lr_sch == 'step':
+            sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
+            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        return ret
 
     def forward(self, x, x_prime, labels=None):
         """ Applies the OBoW self-supervised task to a mini-batch of images.
@@ -531,7 +550,7 @@ class PCLROBoW(pl.LightningModule):
 
         # Extract features (first dim is batch dim)
         x = torch.cat([x_support, x_query], 1)
-        z, _ = self.forward(x)
+        z = self.feature_extractor(x)
         z_support = z[:, :self.eval_ways * shots]
         z_query = z[:, self.eval_ways * shots:]
 
