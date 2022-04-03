@@ -1,8 +1,8 @@
 model:
   optim: "sgd"
   lr_sch: "cos_warmup"
-  warmup_lr: 1e-3
-  warmump_epochs: 250
+  warmup_start_lr: 1e-3
+  warmup_epochs: 250
   eta_min: 5e-5
   lr: 1e-3
   lr_decay_step: 25000 # applies only for Step LR
