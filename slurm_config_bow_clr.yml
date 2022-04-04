@@ -1,12 +1,12 @@
 model:
-  optim: "sgd"
+  optim: "adam"
   lr_sch: "cos_warmup"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  eta_min: 5e-5
+  eta_min: 1e-5
   lr: 1e-3
-  lr_decay_step: 25000
-  lr_decay_rate: 0.5
+  lr_decay_step: 25000 # applies only for Step LR
+  lr_decay_rate: 0.5 # applies only for Step LR
   weight_decay: 0.0001
   alpha_cosine: True
   bow_clr: True
@@ -43,43 +43,46 @@ trainer:
   gpus: -1
   num_sanity_val_steps: 0
   fast_dev_run: 0
-  max_epochs: 1500
+  max_epochs: 2500
+  min_epochs: 700
   limit_train_batches: 100
   limit_val_batches: 15
-  #  logger:
-  #    class_path: pytorch_lightning.loggers.WandbLogger
-  #    init_args:
-  #      name: test2
-  #      project: PCLR-OboW
-  #      save_dir: wandb_logs
-  #      log_model: True
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      #name: ${env:SLURM_JOB_ID}
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"
+        filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}"
         monitor: "val_accuracy"
         save_top_k: 10
         every_n_epochs: 1
         mode: "max"
-
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
-        patience: 200
+        patience: 500
         monitor: "val_accuracy"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "step"
+    - class_path: callbacks.ConfidenceIntervalCallback
+      init_args:
+        log_to_wb: True
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/miniimagenet
-  #  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 0
+  num_workers: 6
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 60, 60 ]
   no_aug_support: True

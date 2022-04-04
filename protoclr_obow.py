@@ -104,6 +104,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_levels: list,
                  bow_extractor_opts: dict,
                  bow_predictor_opts: dict,
+                 bow_clr: bool,
                  optim: str = 'adam',
                  alpha=.99,
                  num_classes=None,
@@ -182,6 +183,7 @@ class PCLROBoW(pl.LightningModule):
         self.n_support = n_support
         self.n_query = n_query
 
+        self.bow_clr = bow_clr
         self.distance = distance
 
         self.weight_decay = weight_decay
@@ -360,13 +362,19 @@ class PCLROBoW(pl.LightningModule):
         losses = torch.stack(losses, dim=0).view(-1)
         logs = list(perp_b + perp_i)
 
-        features_o_stu = self.feature_extractor(x)
+        # TODO: currently only works for one level of BoW (last layer)
+        if self.bow_clr:
+            bow_predictions_x = self.bow_predictor([self.feature_extractor(x)], dictionary)
+            feats = torch.cat([bow_predictions_x[0][0], bow_predictions[0][0]])
+        else:
+            features_o_stu = self.feature_extractor(x)
+            feats = torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
 
         # z = self.feature_extractor(x.view(-1, *x.shape[-3:]))
         # embeddings = nn.Flatten()(z)
         # return embeddings.view(*x.shape[:-3], -1), losses, logs
 
-        return losses, logs, torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
+        return losses, logs, feats
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways):
 
@@ -650,7 +658,7 @@ class PCLROBoW(pl.LightningModule):
                 bow_extr_this["num_words"] = bow_extr_this["num_words"][i]
             bow_extr_this["num_channels"] = num_channels if isinstance(self.feature_extractor,
                                                                        CNN_4Layer) else num_channels // (
-                        2 ** (num_bow_levels - 1 - i))
+                    2 ** (num_bow_levels - 1 - i))
             bow_extractor_opts_list.append(bow_extr_this)
 
         model_opts["bow_extractor_opts_list"] = bow_extractor_opts_list
@@ -682,7 +690,10 @@ class MyCLI(LightningCLI):
     def add_arguments_to_parser(self, parser: pl.utilities.cli.LightningArgumentParser):
         # DEFAULTS
         parser.set_defaults(
-            {"model.feature_extractor": lazy_instance(Encoder4L, in_channels=3, hidden_size=64, out_channels=64)})
+            {
+                "model.feature_extractor": lazy_instance(Encoder4L, in_channels=3, hidden_size=64, out_channels=64),
+                "model.bow_clr": False
+            })
 
         parser.link_arguments("data.dataset", "model.dataset")
         parser.link_arguments("data.batch_size", "model.batch_size")
