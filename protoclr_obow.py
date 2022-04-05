@@ -127,6 +127,8 @@ class PCLROBoW(pl.LightningModule):
                  ft_freeze_backbone=True,
                  finetune_batch_norm=False):
         super().__init__()
+        self.save_hyperparameters()
+        
         assert isinstance(bow_levels, (list, tuple))
         # if isinstance(feature_extractor, ResNet):
         num_channels = feature_extractor.num_channels

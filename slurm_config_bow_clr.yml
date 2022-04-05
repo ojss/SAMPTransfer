@@ -1,6 +1,6 @@
 model:
   optim: "adam"
-  lr_sch: "cos_warmup"
+  lr_sch: "step"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   eta_min: 1e-5
