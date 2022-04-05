@@ -1,0 +1,78 @@
+model:
+  optim: "adam"
+  lr_sch: "step"
+  warmup_start_lr: 1e-3
+  warmup_epochs: 250
+  eta_min: 1e-5
+  lr: 1e-3
+  lr_decay_step: 25000 # applies only for Step LR
+  lr_decay_rate: 0.5 # applies only for Step LR
+  weight_decay: 0.0001
+  alpha_cosine: True
+  bow_clr: False
+  clr_loss: True
+  vicreg_opts:
+    use_vicreg: True
+    std_coeff: 5e-4
+    cov_coeff: 5e-4
+    sim_coeff: 0.3
+  bow_levels: [ "block4" ]
+  bow_extractor_opts:
+    inv_delta: 10
+    num_words: 8192
+  bow_predictor_opts:
+    kappa: 5
+  alpha: 0.99
+  feature_extractor:
+    class_path: bow.feature_extractor.CNN_4Layer
+    init_args:
+      in_channels: 3
+      hidden_size: 64
+      out_channels: 64
+trainer:
+  gpus: -1
+  num_sanity_val_steps: 0
+  fast_dev_run: 0
+  max_epochs: 2500
+  min_epochs: 700
+  limit_train_batches: 100
+  limit_val_batches: 15
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      #name: ${env:SLURM_JOB_ID}
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "./ckpts/"
+        filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}"
+        monitor: "val_accuracy"
+        save_top_k: 10
+        every_n_epochs: 1
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        patience: 500
+        monitor: "val_accuracy"
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
+    - class_path: callbacks.ConfidenceIntervalCallback
+      init_args:
+        log_to_wb: True
+
+data:
+  dataset: "miniimagenet"
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  n_support: 1
+  n_query: 1
+  batch_size: 64
+  num_workers: 6
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 84, 84 ]
+  no_aug_support: True

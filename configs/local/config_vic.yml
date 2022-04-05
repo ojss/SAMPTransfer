@@ -1,0 +1,81 @@
+model:
+  optim: "sgd"
+  lr_sch: "cos_warmup"
+  warmup_start_lr: 1e-3
+  warmup_epochs: 250
+  eta_min: 5e-5
+  lr: 1e-3
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
+  weight_decay: 0.0001
+  alpha_cosine: True
+  bow_clr: False
+  clr_loss: True
+  bow_levels: [ "block4" ]
+  bow_extractor_opts:
+    inv_delta: 10
+    num_words: 4096
+  bow_predictor_opts:
+    kappa: 5
+  alpha: 0.99
+  vicreg_opts:
+    use_vicreg: True
+    std_coeff: 1e-4
+    cov_coeff: 1e-4
+    sim_coeff: 0.3
+  feature_extractor:
+    class_path: bow.feature_extractor.CNN_4Layer
+    init_args:
+      in_channels: 3
+      hidden_size: 64
+      out_channels: 64
+#    class_path: bow.feature_extractor.ResNet
+#    init_args:
+#      arch: resnet18
+#      global_pooling: True
+#optim:
+#  optim_type: "sgd"
+#  momentum: 0.9
+#  weight_decay: 0.0001
+#  nesterov: False
+#  num_epochs: 200
+#  lr: 0.03
+#  end_lr: 0.00003
+#  lr_schedule_type: "cos_warmup"
+#  warmup_epochs: 10
+#  permanent: 10 # save a permanent checkpoint every 10 epochs.
+
+trainer:
+  gpus: -1
+  num_sanity_val_steps: 0
+  fast_dev_run: 0
+  max_epochs: 1500
+  limit_train_batches: 100
+  limit_val_batches: 15
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "./ckpts/"
+        monitor: "val_accuracy"
+        save_top_k: 10
+        every_n_epochs: 1
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        patience: 200
+        monitor: "val_accuracy"
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
+
+data:
+  dataset: "miniimagenet"
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/miniimagenet
+  n_support: 1
+  n_query: 1
+  batch_size: 16
+  num_workers: 0
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 84, 84 ]
+  no_aug_support: True

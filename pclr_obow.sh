@@ -40,6 +40,5 @@ module load miniconda/3.9
 # Use this simple command to check that your sbatch settings are working (verify the resources allocated in the usage statistics)
 
 source activate /home/nfs/oshirekar/unsupervised_ml/ai2
-# srun python runner.py cactus --emb_data_dir="/home/nfs/oshirekar/unsupervised_ml/data/cactus_data" --n_ways=5 --n_shots=1 --use_precomputed_partitions=False
 
-srun python protoclr_obow.py --config slurm_config.yml
+srun python protoclr_obow.py --config "$1"

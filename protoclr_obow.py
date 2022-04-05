@@ -24,6 +24,7 @@ from dataloaders import UnlabelledDataModule
 from proto_utils import (Encoder4L,
                          get_prototypes,
                          prototypical_loss)
+import vicreg.utils as vic_utils
 
 
 @torch.no_grad()
@@ -104,7 +105,9 @@ class PCLROBoW(pl.LightningModule):
                  bow_levels: list,
                  bow_extractor_opts: dict,
                  bow_predictor_opts: dict,
+                 clr_loss: bool,
                  bow_clr: bool,
+                 vicreg_opts: dict,
                  optim: str = 'adam',
                  alpha=.99,
                  num_classes=None,
@@ -128,11 +131,12 @@ class PCLROBoW(pl.LightningModule):
                  finetune_batch_norm=False):
         super().__init__()
         self.save_hyperparameters()
-        
+
         assert isinstance(bow_levels, (list, tuple))
         # if isinstance(feature_extractor, ResNet):
         num_channels = feature_extractor.num_channels
         self.feature_extractor = feature_extractor
+        self.num_words = bow_extractor_opts["num_words"]
 
         bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
             'bow_extractor_opts_list']
@@ -185,6 +189,7 @@ class PCLROBoW(pl.LightningModule):
         self.n_support = n_support
         self.n_query = n_query
 
+        self.clr_loss = clr_loss
         self.bow_clr = bow_clr
         self.distance = distance
 
@@ -199,6 +204,7 @@ class PCLROBoW(pl.LightningModule):
         self.lr_decay_step = lr_decay_step
         self.inner_lr = inner_lr
 
+        # PCLR Supfinetune
         self.mode = mode
         self.eval_ways = eval_ways
         self.sup_finetune = sup_finetune
@@ -210,6 +216,9 @@ class PCLROBoW(pl.LightningModule):
         self.num_channels = num_channels
         # self.example_input_array = [batch_size, 1, 28, 28] if dataset == 'omniglot'\
         #     else [batch_size, 3, 84, 84]
+
+        # VICReg
+        self.vicreg = vicreg_opts
 
         self.automatic_optimization = True
 
@@ -228,6 +237,30 @@ class PCLROBoW(pl.LightningModule):
             return self._alpha.item()
         else:
             return self._alpha
+
+    def _vicreg_loss(self, x, y):
+        # TODO: remove representation loss since BoW Loss already handles this
+        # repr_loss = F.mse_loss(x, y)
+
+        x = self.all_gather(x)
+        y = self.all_gather(y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        std_x = torch.sqrt(x.var(dim=0) + 1e-4)  # for numerical stability
+        std_y = torch.sqrt(y.var(dim=0) + 1e-4)
+        std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
+
+        cov_x = (x.T @ x) / (self.batch_size - 1)
+        cov_y = (y.T @ y) / (self.batch_size - 1)
+        cov_loss = vic_utils.off_diagonal(cov_x).pow_(2).sum().div(
+            # Since we are currently only operating on the BoW representations and not the encoder representations
+            self.num_words  # TODO: pull this out of BoW predictor opts
+        ) + vic_utils.off_diagonal(cov_y).pow_(2).sum().div(self.num_words)
+
+        loss = self.vicreg['std_coeff'] * std_loss + self.vicreg['cov_coeff'] * cov_loss
+        return loss
 
     @torch.no_grad()
     def _update_teacher(self):
@@ -365,7 +398,7 @@ class PCLROBoW(pl.LightningModule):
         logs = list(perp_b + perp_i)
 
         # TODO: currently only works for one level of BoW (last layer)
-        if self.bow_clr:
+        if self.bow_clr or self.vicreg["use_vicreg"]:
             bow_predictions_x = self.bow_predictor([self.feature_extractor(x)], dictionary)
             feats = torch.cat([bow_predictions_x[0][0], bow_predictions[0][0]])
         else:
@@ -398,6 +431,7 @@ class PCLROBoW(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # [batch_size x ways x shots x image_dim]
         # data = batch['data'].to(self.device)
+        accuracy = 0.
         data = batch['origs']
         views = batch['views']
         data = data.unsqueeze(0)
@@ -435,24 +469,23 @@ class PCLROBoW(pl.LightningModule):
         losses, logs, z = self.forward(x_support, [x_query])
         loss = losses.sum()
         self.log("bow_loss", loss.item(), prog_bar=True)
-        clr_loss, accuracy = self.calculate_protoclr_loss(
-            z, y_support, y_query, ways)
-        self.log('clr_loss', clr_loss.item(), prog_bar=True)
 
-        loss += clr_loss
+        # Contrastive Loss based on ProtoCLR
+        if self.clr_loss:
+            clrl, accuracy = self.calculate_protoclr_loss(z, y_support, y_query, ways)
+            self.log('clr_loss', clrl.item(), prog_bar=True)
+            self.log("accuracy", accuracy, prog_bar=True)
+            loss += clrl
 
-        # opt.zero_grad()
+        # Using only the VC losses of the VICReg loss. TODO: maybe see if the repr loss can be used?
+        if self.vicreg["use_vicreg"]:
+            vcl = self._vicreg_loss(z[:ways * self.n_support, ...], z[ways * self.n_support:, ...])
+            self.log("vc_loss", vcl.item(), prog_bar=True)
+            loss += vcl
 
-        # self.manual_backward(loss)
-        # opt.step()
-        # sch.step()
+        self.log_dict({'loss': loss.item()}, prog_bar=True)
 
-        self.log_dict({
-            'loss': loss.item(),
-            'train_accuracy': accuracy
-        }, prog_bar=True)
-
-        return {"loss": loss, "accuracy": accuracy}
+        return {"loss": loss, "accuracy": accuracy}  # accuracy return as 0 by default if CLR loss not used
 
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
@@ -694,7 +727,8 @@ class MyCLI(LightningCLI):
         parser.set_defaults(
             {
                 "model.feature_extractor": lazy_instance(Encoder4L, in_channels=3, hidden_size=64, out_channels=64),
-                "model.bow_clr": False
+                "model.bow_clr": False,
+                "model.clr_loss": True
             })
 
         parser.link_arguments("data.dataset", "model.dataset")
@@ -706,6 +740,31 @@ class MyCLI(LightningCLI):
         parser.add_argument("bow_extractor_opts.num_words", default=8192)
 
         parser.add_argument("bow_predictor_opts.kappa", default=8)
+
+        parser.add_argument(
+            "--nodes", default=4, type=int, help="Number of nodes to request"
+        )
+        parser.add_argument(
+            "--ngpus", default=8, type=int, help="Number of gpus to request on each node"
+        )
+        parser.add_argument(
+            "--timeout", default=72, type=int, help="Duration of the job, in hours"
+        )
+        parser.add_argument("--job_name", default="vicreg", type=str, help="Job name")
+        parser.add_argument(
+            "--partition", default="mypartition", type=str, help="Partition where to submit"
+        )
+        parser.add_argument(
+            "--constraint",
+            default="",
+            type=str,
+            help="Slurm constraint. Use 'volta32gb' for Tesla V100 with 32GB",
+        )
+        parser.add_argument(
+            "--comment",
+            default="",
+            type=str,
+            help="Comment to pass to scheduler, e.g. priority message")
 
 
 def cli_main():
