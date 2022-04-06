@@ -14,11 +14,14 @@ from pathlib import Path
 import protoclr_obow
 from dataloaders import UnlabelledDataModule
 
+UUID = uuid.uuid4()
+
 
 def parse_args():
     cli = protoclr_obow.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule,
                               run=False,
                               save_config_overwrite=True,
+                              save_config_filename=str(UUID),
                               parser_kwargs={"parser_mode": "omegaconf"})
     return cli
 
@@ -27,7 +30,7 @@ def main():
     cli = parse_args()
     args = cli.config["slurm"]
     ngpus = int(args["slurm_additional_parameters"]["gres"][-1])
-    exp_dir = Path(f'./expts/{str(uuid.uuid4())}')
+    exp_dir = Path(f'./expts/{str(UUID)}')
 
     exp_dir.mkdir(parents=True, exist_ok=True)
     executor = submitit.AutoExecutor(folder=exp_dir)

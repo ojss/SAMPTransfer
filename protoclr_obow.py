@@ -769,7 +769,8 @@ class MyCLI(LightningCLI):
 
 
 def cli_main():
-    cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False, save_config_overwrite=True,
+    cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
+                save_config_overwrite=True,
                 parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model, cli.datamodule)
     cli.trainer.test(datamodule=cli.datamodule)
