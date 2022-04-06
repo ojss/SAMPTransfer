@@ -1,3 +1,4 @@
+job_name: vic_local_test
 model:
   optim: "sgd"
   lr_sch: "cos_warmup"

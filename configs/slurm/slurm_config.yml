@@ -1,3 +1,10 @@
+job_name: only_pclr_obow
+slurm:
+  nodes: 1
+  timeout: 4
+  slurm_additional_parameters:
+    qos: short
+    gres: gpu:a40:1
 model:
   optim: "adam"
   lr_sch: "step"
