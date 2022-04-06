@@ -10,6 +10,7 @@ model:
   weight_decay: 0.0001
   alpha_cosine: True
   bow_clr: True
+  clr_loss: True
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10
