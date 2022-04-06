@@ -33,7 +33,7 @@ def main():
     executor = submitit.AutoExecutor(folder=exp_dir)
 
     executor.update_parameters(
-        name=args["job_name"],
+        name=cli.config["job_name"],
         # gpus_per_node=args["ngpus"],
         mem_gb=12 * ngpus,
         tasks_per_node=ngpus,
