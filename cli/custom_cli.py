@@ -27,26 +27,26 @@ class MyCLI(LightningCLI):
 
         parser.add_argument("job_name", default="local_dev_run", type=str, help="Job name")
         parser.add_argument(
-            "slurm.nodes", default=1, type=int, help="Number of nodes to request"
+            "--slurm.nodes", default=1, type=int, help="Number of nodes to request"
         )
         # parser.add_argument(
         #     "slurm.ngpus", default=1, type=int, help="Number of gpus to request on each node"
         # )
         parser.add_argument(
-            "slurm.timeout", default=72, type=int, help="Duration of the job, in hours"
+            "--slurm.timeout", default=72, type=int, help="Duration of the job, in hours"
         )
         parser.add_argument(
-            "slurm.partition", default="general", type=str, help="Partition where to submit"
+            "--slurm.partition", default="general", type=str, help="Partition where to submit"
         )
-        parser.add_argument("slurm.slurm_additional_parameters", type=dict)
+        parser.add_argument("--slurm.slurm_additional_parameters", type=dict)
         parser.add_argument(
-            "slurm.constraint",
+            "--slurm.constraint",
             default="",
             type=str,
             help="Slurm constraint. Use 'volta32gb' for Tesla V100 with 32GB",
         )
         parser.add_argument(
-            "slurm.comment",
+            "--slurm.comment",
             default="",
             type=str,
             help="Comment to pass to scheduler, e.g. priority message")

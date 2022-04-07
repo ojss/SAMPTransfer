@@ -23,6 +23,7 @@ from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from torchmetrics.functional import accuracy
 
 
 @torch.no_grad()
@@ -122,10 +123,12 @@ class PCLROBoW(pl.LightningModule):
                  mode='trainval',
                  eval_ways=5,
                  # moco
-                 K: int = 65536,
-                 m: float = .999,
-                 T: float = .07,
-                 mlp: bool = False,
+                 moco_opts: dict = dict(K=65536,
+                                        m=.999,
+                                        T=.07,
+                                        dim=128,
+                                        mlp=False,
+                                        ),
                  sup_finetune=True,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
@@ -216,9 +219,34 @@ class PCLROBoW(pl.LightningModule):
         self.finetune_batch_norm = finetune_batch_norm
 
         # MoCo params
-        self.K = K
-        self.m = m
-        self.T = T
+        self.moco_opts = moco_opts
+        if moco_opts["use_moco"]:
+            self.K = moco_opts['K']
+            self.m = moco_opts['m']
+            self.T = moco_opts['T']
+            # create encoders
+            self.encoder_q = nn.Sequential(
+                self.feature_extractor,
+                nn.Flatten(),
+                nn.Linear(feature_extractor.num_channels, moco_opts["dim"]),
+                nn.ReLU()
+            )
+
+            self.encoder_k = nn.Sequential(
+                self.feature_extractor_teacher,
+                nn.Flatten(),
+                nn.Linear(self.feature_extractor_teacher.num_channels, moco_opts["dim"]),
+                nn.ReLU()
+            )
+
+            # block off gradients again
+            for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
+                param_k.data.copy_(param_q.data)
+                param_k.requires_grad = False  # because these guys need to be EWMAed as well just like the CNN
+            # create moco queue
+            self.register_buffer("queue", torch.randn(moco_opts["dim"], self.K))
+            self.queue = F.normalize(self.queue, dim=0)
+            self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
         # self.example_input_array = [batch_size, 1, 28, 28] if dataset == 'omniglot'\
         #     else [batch_size, 3, 84, 84]
 
@@ -271,6 +299,8 @@ class PCLROBoW(pl.LightningModule):
     def _update_teacher(self):
         """ Exponetial moving average for the feature_extractor_teacher params:
             param_teacher = param_teacher * alpha + param * (1-alpha)
+
+            In case of MoCo the alpha is not scaled using a cosine schedule
         """
         if not self.training:
             return
@@ -278,9 +308,30 @@ class PCLROBoW(pl.LightningModule):
         self.log("alpha", alpha)
         if alpha >= 1.:
             return
-        for param, param_teacher in zip(self.feature_extractor.parameters(),
-                                        self.feature_extractor_teacher.parameters()):
+        if self.moco_opts["use_moco"]:
+            student_params = self.encoder_q.parameters()
+            teacher_params = self.encoder_k.parameters()
+        else:
+            student_params = self.feature_extractor.parameters()
+            teacher_params = self.feature_extractor_teacher.parameters()
+        for param, param_teacher in zip(student_params, teacher_params):
+            # TODO: check if this works just the same for MoCo especially the param.detach part,
+            #  MoCo implementation doesn't have it
             param_teacher.data.mul_(alpha).add_(param.detach().data, alpha=(1. - alpha))
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys):
+        # TODO: fix this for using with multiple gpus or copy the concat gather function
+        keys = self.all_gather(keys)
+        batch_size = keys.shape[0]
+
+        ptr = int(self.queue_ptr)
+        assert self.K % batch_size == 0  # for simplicity and partity with the BoW bits
+
+        # replace the keys at the ptr location (dequeue and enqueue)
+        self.queue[:, ptr: ptr + batch_size] = keys.T
+        ptr = (ptr + batch_size) % self.K
+        self.queue_ptr[0] = ptr
 
     def _bow_loss(self, bow_prediction, bow_target):
         assert isinstance(bow_prediction, (list, tuple))
@@ -394,6 +445,9 @@ class PCLROBoW(pl.LightningModule):
             self._update_teacher()
             bow_target, features_t = self.generate_bow_targets(x)
             perp_b, perp_i = compute_bow_perplexity(bow_target)
+            if self.moco_opts["use_moco"]:
+                k = self.encoder_k(x)
+                k = F.normalize(k, dim=1)
 
         ######## COMPUTE BOW PREDICTION LOSSES #######
         losses = [self._bow_loss(pred, bow_target) for pred in bow_predictions]
@@ -410,9 +464,30 @@ class PCLROBoW(pl.LightningModule):
             features_o_stu = self.feature_extractor(x)
             feats = torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
 
-        # z = self.feature_extractor(x.view(-1, *x.shape[-3:]))
-        # embeddings = nn.Flatten()(z)
-        # return embeddings.view(*x.shape[:-3], -1), losses, logs
+        if self.moco_opts["use_moco"]:
+            # compute query features
+            q = self.encoder_q(x_prime[0])
+            q = F.normalize(q, dim=1)
+
+            # compute logits
+            # einsum is faster
+            # positive logits: N x 1
+            l_pos = torch.einsum("nc, nc -> n", [q, k]).unsqueeze(-1)
+            # negative logits N x K
+            l_neg = torch.einsum("nc, ck -> nk", q, self.queue.clone().detach())
+
+            # logits: N x (1 + K)
+            logits = torch.cat([l_pos, l_neg], dim=1)
+
+            # apply temperature
+            logits /= self.T
+
+            # labels: positive key indicators
+            labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
+
+            # dequeue and enqueue
+            self._dequeue_and_enqueue(keys=k)
+            return losses, logs, feats, logits, labels
 
         return losses, logs, feats
 
@@ -436,7 +511,7 @@ class PCLROBoW(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # [batch_size x ways x shots x image_dim]
         # data = batch['data'].to(self.device)
-        accuracy = 0.
+        acc = 0.
         data = batch['origs']
         views = batch['views']
         data = data.unsqueeze(0)
@@ -471,15 +546,19 @@ class PCLROBoW(pl.LightningModule):
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
-        losses, logs, z = self.forward(x_support, [x_query])
+        if self.moco_opts["use_moco"]:
+            losses, logs, z, output, target = self.forward(x_support, [x_query])
+        else:
+            losses, logs, z = self.forward(x_support, [x_query])
+
         loss = losses.sum()
         self.log("bow_loss", loss.item(), prog_bar=True)
 
         # Contrastive Loss based on ProtoCLR
         if self.clr_loss:
-            clrl, accuracy = self.calculate_protoclr_loss(z, y_support, y_query, ways)
+            clrl, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
             self.log('clr_loss', clrl.item(), prog_bar=True)
-            self.log("accuracy", accuracy, prog_bar=True)
+            self.log("accuracy", acc, prog_bar=True)
             loss += clrl
 
         # Using only the VC losses of the VICReg loss. TODO: maybe see if the repr loss can be used?
@@ -488,9 +567,15 @@ class PCLROBoW(pl.LightningModule):
             self.log("vc_loss", vcl.item(), prog_bar=True)
             loss += vcl
 
+        # MoCo loss implemented directly as CE loss instead of kl_div
+        if self.moco_opts["use_moco"]:
+            mcl = F.cross_entropy(output, target)
+            acc = accuracy(output, target, top_k=5)
+            self.log("moco_loss", mcl, prog_bar=True)
+            loss += mcl
         self.log_dict({'loss': loss.item()}, prog_bar=True)
 
-        return {"loss": loss, "accuracy": accuracy}  # accuracy return as 0 by default if CLR loss not used
+        return {"loss": loss, "accuracy": acc}  # accuracy return as 0 by default if CLR loss not used
 
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,

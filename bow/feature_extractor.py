@@ -290,7 +290,7 @@ def conv3x3(in_channels, out_channels, maxpool=True, **kwargs):
 
 
 class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
-    def __init__(self, in_channels, out_channels=64, hidden_size=64, last_maxpool=True, global_pooling=True):
+    def __init__(self, in_channels: int, out_channels=64, hidden_size=64, last_maxpool=True, global_pooling=True):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_size = hidden_size
