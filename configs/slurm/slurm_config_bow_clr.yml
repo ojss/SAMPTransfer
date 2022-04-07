@@ -18,6 +18,10 @@ model:
   alpha_cosine: True
   bow_clr: True
   clr_loss: True
+  vicreg_opts:
+    use_vicreg: False
+  moco_opts:
+    use_moco: False
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10

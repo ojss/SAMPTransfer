@@ -21,9 +21,11 @@ model:
   clr_loss: True
   vicreg_opts:
     use_vicreg: False
+  moco_opts:
+    use_moco: False
   bow_extractor_opts:
     inv_delta: 10
-    num_words: 2048 
+    num_words: 2048
   bow_predictor_opts:
     kappa: 5
   alpha: 0.99

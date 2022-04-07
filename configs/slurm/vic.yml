@@ -17,12 +17,14 @@ model:
   weight_decay: 0.0001
   alpha_cosine: True
   bow_clr: False
-  clr_loss: True
+  clr_loss: True # TODO: try with no CLR loss at all!
   vicreg_opts:
     use_vicreg: True
     std_coeff: 5e-4
     cov_coeff: 5e-4
     sim_coeff: 0.3
+  moco_opts:
+    use_moco: False
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10
