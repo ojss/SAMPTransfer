@@ -820,6 +820,7 @@ def cli_main():
 
 
 def slurm_main(cli):
+    cli.instantiate_classes()
     cli.trainer.fit(cli.model, cli.datamodule)
     cli.trainer.test(datamodule=cli.datamodule)
 
