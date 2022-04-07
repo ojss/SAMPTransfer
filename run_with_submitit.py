@@ -11,7 +11,7 @@ import os
 import uuid
 from pathlib import Path
 
-import cli.custom_cli
+from cli import custom_cli
 import protoclr_obow
 from dataloaders import UnlabelledDataModule
 
@@ -19,11 +19,11 @@ UUID = uuid.uuid4()
 
 
 def parse_args():
-    cli = cli.custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule,
-                               run=False,
-                               save_config_overwrite=True,
-                               save_config_filename=str(UUID),
-                               parser_kwargs={"parser_mode": "omegaconf"})
+    cli = custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule,
+                           run=False,
+                           save_config_overwrite=True,
+                           save_config_filename=str(UUID),
+                           parser_kwargs={"parser_mode": "omegaconf"})
     return cli
 
 
