@@ -1,4 +1,4 @@
-job_name: vic_clr_obow
+job_name: moco_obow
 slurm:
   nodes: 1
   timeout: 10
@@ -6,7 +6,7 @@ slurm:
     qos: medium
     gres: gpu:a40:1
 model:
-  optim: "adam"
+  optim: "sgd"
   lr_sch: "step"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
