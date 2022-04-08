@@ -226,14 +226,14 @@ class PCLROBoW(pl.LightningModule):
             self.T = moco_opts['T']
             # create encoders
             self.encoder_q = nn.Sequential(
-                self.feature_extractor,
+                # self.feature_extractor,
                 nn.Flatten(),
                 nn.Linear(feature_extractor.num_channels, moco_opts["dim"]),
                 nn.ReLU()
             )
 
             self.encoder_k = nn.Sequential(
-                self.feature_extractor_teacher,
+                # self.feature_extractor_teacher,
                 nn.Flatten(),
                 nn.Linear(self.feature_extractor_teacher.num_channels, moco_opts["dim"]),
                 nn.ReLU()
@@ -446,7 +446,7 @@ class PCLROBoW(pl.LightningModule):
             bow_target, features_t = self.generate_bow_targets(x)
             perp_b, perp_i = compute_bow_perplexity(bow_target)
             if self.moco_opts["use_moco"]:
-                k = self.encoder_k(x)
+                k = self.encoder_k(self.feature_extractor_teacher(x))
                 k = F.normalize(k, dim=1)
 
         ######## COMPUTE BOW PREDICTION LOSSES #######
@@ -466,7 +466,7 @@ class PCLROBoW(pl.LightningModule):
 
         if self.moco_opts["use_moco"]:
             # compute query features
-            q = self.encoder_q(x_prime[0])
+            q = self.encoder_q(self.feature_extractor(x_prime[0]))
             q = F.normalize(q, dim=1)
 
             # compute logits
