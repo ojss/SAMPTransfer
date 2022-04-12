@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 import bow.bow_utils as utils
@@ -23,7 +24,6 @@ from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
                          prototypical_loss)
-from torchmetrics.functional import accuracy
 
 
 @torch.no_grad()
@@ -106,6 +106,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_predictor_opts: dict,
                  clr_loss: bool,
                  bow_clr: bool,
+                 clr_on_bow: bool,
                  vicreg_opts: dict,
                  optim: str = 'adam',
                  alpha=.99,
@@ -173,7 +174,14 @@ class PCLROBoW(pl.LightningModule):
         self.bow_predictor = BoWPredictor(**bow_predictor_opts)
 
         # Building teacher network
-        self.feature_extractor_teacher = copy.deepcopy(self.feature_extractor)
+        if not clr_on_bow:
+            # CLR on BoW to be implemented as just one network
+            self.feature_extractor_teacher = copy.deepcopy(self.feature_extractor)
+            for param, param_teacher in zip(self.feature_extractor.parameters(),
+                                            self.feature_extractor_teacher.parameters()):
+                param_teacher.data.copy_(param.data)  # initialise with the same weights
+                param_teacher.requires_grad = False  # doesn't get updated by grades instead uses EWMA
+
         self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         if num_classes is not None:
@@ -184,11 +192,6 @@ class PCLROBoW(pl.LightningModule):
         else:
             self.linear_classifier = None
 
-        for param, param_teacher in zip(self.feature_extractor.parameters(),
-                                        self.feature_extractor_teacher.parameters()):
-            param_teacher.data.copy_(param.data)  # initialise with the same weights
-            param_teacher.requires_grad = False  # doesn't get updated by grades instead uses EWMA
-
         self.dataset = dataset
         self.batch_size = batch_size
         self.n_support = n_support
@@ -196,6 +199,7 @@ class PCLROBoW(pl.LightningModule):
 
         self.clr_loss = clr_loss
         self.bow_clr = bow_clr
+        self.clr_on_bow = clr_on_bow
         self.distance = distance
 
         self.weight_decay = weight_decay
@@ -365,7 +369,10 @@ class PCLROBoW(pl.LightningModule):
 
     def generate_bow_targets(self, image):
         # TODO: see if this can be updated for Conv-4 -> what levels to go for?
-        features = self.feature_extractor_teacher(image, self._bow_levels)
+        if self.clr_on_bow:
+            features = self.feature_extractor(image, self._bow_levels)
+        else:
+            features = self.feature_extractor_teacher(image, self._bow_levels)
         if isinstance(features, torch.Tensor):
             features = [features, ]
         bow_target, _ = self.bow_extractor(features)
@@ -456,7 +463,7 @@ class PCLROBoW(pl.LightningModule):
         losses = torch.stack(losses, dim=0).view(-1)
         logs = list(perp_b + perp_i)
 
-        # TODO: currently only works for one level of BoW (last layer)
+        # TODO: change this to only use teacher for the training when using bow_clr
         if self.bow_clr or self.vicreg["use_vicreg"]:
             bow_predictions_x = self.bow_predictor([self.feature_extractor(x)], dictionary)
             feats = torch.cat([bow_predictions_x[0][0], bow_predictions[0][0]])
@@ -491,6 +498,20 @@ class PCLROBoW(pl.LightningModule):
 
         return losses, logs, feats
 
+    @torch.enable_grad()
+    def _clr_on_bow_forward(self, x_support, y_support, x_query, y_query, ways):
+        # x_query = [x_query]
+        # Compute BoW representations for all images
+        bow_repr, z = self.generate_bow_targets(torch.cat([x_support, x_query]))
+        z_supp_bow = bow_repr[0][:ways * self.n_support, ...].unsqueeze(0)
+        z_query_bow = bow_repr[0][ways * self.n_support:, ...].unsqueeze(0)
+        if self.n_support == 1:
+            z_proto = z_supp_bow
+        else:
+            z_proto = get_prototypes(z_supp_bow, y_support, ways)
+        loss, acc = prototypical_loss(z_proto, z_query_bow, y_query, distance=self.distance)
+        return loss, acc
+
     def calculate_protoclr_loss(self, z, y_support, y_query, ways):
 
         #
@@ -504,9 +525,9 @@ class PCLROBoW(pl.LightningModule):
         else:
             z_proto = get_prototypes(z_support, y_support, ways)
 
-        loss, accuracy = prototypical_loss(z_proto, z_query, y_query,
-                                           distance=self.distance)
-        return loss, accuracy
+        loss, acc = prototypical_loss(z_proto, z_query, y_query,
+                                      distance=self.distance)
+        return loss, acc
 
     def training_step(self, batch, batch_idx):
         # [batch_size x ways x shots x image_dim]
@@ -548,11 +569,14 @@ class PCLROBoW(pl.LightningModule):
         # x = torch.cat([x_support, x_query], 1)
         if self.moco_opts["use_moco"]:
             losses, logs, z, output, target = self.forward(x_support, [x_query])
+        elif self.clr_on_bow:
+            loss, acc = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
         else:
             losses, logs, z = self.forward(x_support, [x_query])
 
-        loss = losses.sum()
-        self.log("bow_loss", loss.item(), prog_bar=True)
+        if not self.clr_on_bow:
+            loss = losses.sum()
+            self.log("bow_loss", loss.item(), prog_bar=True)
 
         # Contrastive Loss based on ProtoCLR
         if self.clr_loss:
