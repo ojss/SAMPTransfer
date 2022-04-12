@@ -6,18 +6,17 @@ slurm:
     qos: medium
     gres: gpu:a40:1
     signal: SIGUSR1@90
-
 model:
   optim: "adam"
   lr_sch: "step"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  eta_min: 5e-5
+  eta_min: 1e-5
   lr: 1e-3
-  lr_decay_step: 25000
-  lr_decay_rate: 0.5
+  lr_decay_step: 25000 # applies only for Step LR
+  lr_decay_rate: 0.5 # applies only for Step LR
   weight_decay: 0.0001
-  alpha_cosine: False # TODO: check with True + Moco loss as well
+  alpha_cosine: False # Doesn't really matter here
   bow_clr: False
   clr_loss: False
   clr_on_bow: True
@@ -72,16 +71,15 @@ trainer:
       init_args:
         logging_interval: "step"
     - class_path: callbacks.ConfidenceIntervalCallback
-        init_args:
-          log_to_wb: True
-
+      init_args:
+        log_to_wb: True
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 0
+  num_workers: 6
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

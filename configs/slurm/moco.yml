@@ -19,6 +19,7 @@ model:
   alpha_cosine: False # TODO: Try with true as well
   bow_clr: False
   clr_loss: False
+  clr_on_bow: False
   vicreg_opts:
     use_vicreg: False
   moco_opts:
