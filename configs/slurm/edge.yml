@@ -46,7 +46,7 @@ model:
       graph_conv: ${model.graph_conv_opts.use_graph_conv}
 trainer:
   gpus: -1
-  num_sanity_val_steps: 1
+  num_sanity_val_steps: 2
   fast_dev_run: False
   max_epochs: 2500
   min_epochs: 300

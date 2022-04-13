@@ -145,7 +145,6 @@ class PCLROBoW(pl.LightningModule):
         # if isinstance(feature_extractor, ResNet):
         num_channels = feature_extractor.num_channels
         self.feature_extractor = feature_extractor
-        # print(torchinfo.summary(feature_extractor, input_size=(64, 3, 84, 84)))
         self.num_words = bow_extractor_opts["num_words"]
 
         bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
@@ -232,6 +231,8 @@ class PCLROBoW(pl.LightningModule):
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, 84, 84)).shape
             self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
             self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
+            # self.feature_extractor.add_module('edge_conv', self.ec1)
+            print(torchinfo.summary(feature_extractor, input_size=(64, 3, 84, 84)))
 
             # MoCo params
         self.moco_opts = moco_opts
@@ -626,7 +627,7 @@ class PCLROBoW(pl.LightningModule):
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
                               freeze_backbone=False, finetune_batch_norm=False,
-                              inner_lr=0.001, total_epoch=15, n_way=5):
+                              inner_lr=0.001, total_epoch=15, n_way=5, ec=None):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -646,9 +647,13 @@ class PCLROBoW(pl.LightningModule):
         x_a_i = x_support_var
         encoder.eval()
 
-        # TODO: remove view add in network
-        z_a_i = nn.Flatten()(encoder(x_a_i.to(device)))  # .view(*x_a_i.shape[:-3], -1)
+        z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1)
         encoder.train()
+
+        if self.graph_conv and ec is not None:
+            ec.eval()
+            ec(z_a_i)
+            ec.train()
 
         # Define linear classifier
         input_dim = z_a_i.shape[1]
@@ -664,6 +669,7 @@ class PCLROBoW(pl.LightningModule):
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
                 filter(lambda p: p.requires_grad, encoder.parameters()), lr=inner_lr)
+            # TODO: add provisions for EdgeConv layer here until then freeze_backbone=False
         # Finetuning
         if freeze_backbone is False:
             encoder.train()
@@ -691,7 +697,8 @@ class PCLROBoW(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
                 #####################################
 
-                output = nn.Flatten()(encoder(z_batch))
+                output = encoder(z_batch).flatten(1)
+                output = ec(output)
                 output = classifier(output)
                 loss = loss_fn(output, y_batch)
 
@@ -705,14 +712,16 @@ class PCLROBoW(pl.LightningModule):
         classifier.eval()
         encoder.eval()
 
-        output = nn.Flatten()(encoder(x_b_i.to(device)))
+        output = encoder(x_b_i.to(self.device)).flatten(1)
+        output = ec(output)
         scores = classifier(output)
 
-        y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(device)
+        y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
         loss = F.cross_entropy(scores, y_query, reduction='mean')
         _, predictions = torch.max(scores, dim=1)
-        accuracy = torch.mean(predictions.eq(y_query).float())
-        return loss, accuracy.item()
+        # acc = torch.mean(predictions.eq(y_query).float())
+        acc = accuracy(predictions, y_query)
+        return loss, acc.item()
 
     def std_proto_form(self, batch, batch_idx):
         x_support = batch["train"][0]
@@ -746,34 +755,45 @@ class PCLROBoW(pl.LightningModule):
     # TODO: check if validation is to be done with teacher or student
     def validation_step(self, batch, batch_idx):
         loss = 0.
-        accuracy = 0.
+        acc = 0.
+        ec = None
         original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
+        if self.graph_conv:
+            original_ec_state = copy.deepcopy(self.ec1.state_dict())
+            ec = self.ec1
 
         if self.sup_finetune:
-            loss, accuracy = self.supervised_finetuning(self.feature_extractor,
-                                                        episode=batch,
-                                                        inner_lr=self.sup_finetune_lr,
-                                                        total_epoch=self.sup_finetune_epochs,
-                                                        freeze_backbone=self.ft_freeze_backbone,
-                                                        finetune_batch_norm=self.finetune_batch_norm,
-                                                        device=self.device,
-                                                        n_way=self.eval_ways)
+            loss, acc = self.supervised_finetuning(self.feature_extractor,
+                                                   episode=batch,
+                                                   inner_lr=self.sup_finetune_lr,
+                                                   total_epoch=self.sup_finetune_epochs,
+                                                   freeze_backbone=self.ft_freeze_backbone,
+                                                   finetune_batch_norm=self.finetune_batch_norm,
+                                                   device=self.device,
+                                                   n_way=self.eval_ways,
+                                                   ec=ec)
             self.feature_extractor.load_state_dict(original_encoder_state)
+            if self.graph_conv:
+                self.ec1.load_state_dict(original_ec_state)
         elif not self.sup_finetune:
             with torch.no_grad():
-                loss, accuracy = self.std_proto_form(batch, batch_idx)
+                loss, acc = self.std_proto_form(batch, batch_idx)
 
         self.log_dict({
             'val_loss': loss.detach(),
-            'val_accuracy': accuracy
+            'val_accuracy': acc
         }, prog_bar=True)
 
-        return loss.item(), accuracy
+        return loss.item(), acc
 
     def test_step(self, batch, batch_idx):
+        ec = None
         original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
+        if self.graph_conv:
+            original_ec_state = copy.deepcopy(self.ec1.state_dict())
+            ec = self.ec1
         if self.sup_finetune:
-            loss, accuracy = self.supervised_finetuning(
+            loss, acc = self.supervised_finetuning(
                 self.feature_extractor,
                 episode=batch,
                 inner_lr=self.sup_finetune_lr,
@@ -781,14 +801,17 @@ class PCLROBoW(pl.LightningModule):
                 freeze_backbone=self.ft_freeze_backbone,
                 finetune_batch_norm=self.finetune_batch_norm,
                 n_way=self.eval_ways,
-                device=self.device
+                device=self.device,
+                ec=ec
             )
             torch.cuda.empty_cache()
             self.feature_extractor.load_state_dict(original_encoder_state)
+            if self.graph_conv:
+                self.ec1.load_state_dict(original_ec_state)
         else:
             # Note: this is just using the standard protonet form
             with torch.no_grad():
-                loss, accuracy = self.std_proto_form(batch, batch_idx)
+                loss, acc = self.std_proto_form(batch, batch_idx)
 
         self.log(
             "test_loss",
@@ -800,13 +823,13 @@ class PCLROBoW(pl.LightningModule):
         )
         self.log(
             "test_acc",
-            accuracy,
+            acc,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
         )
-        return loss.item(), accuracy
+        return loss.item(), acc
 
     def bow_opts_converter(self, bow_extractor_opts, bow_levels, num_channels):
         model_opts = {}

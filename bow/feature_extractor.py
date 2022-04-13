@@ -1,7 +1,7 @@
 import math
 import torch.nn as nn
 import torchvision.models as models
-
+import torch_geometric.nn as gnn
 from . import bow_utils as utils
 
 
@@ -316,6 +316,8 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
         if graph_conv:
             feature_blocks.append(nn.Flatten())
             all_feat_names.append('FinalFlatten')
+            # feature_blocks.append(gnn.DynamicEdgeConv(nn.Linear(1600 * 2, 1600), k=5))
+            # all_feat_names.append('EdgeConv')
         super(CNN_4Layer, self).__init__(all_feat_names, feature_blocks)
         self.num_channels = out_channels
 
