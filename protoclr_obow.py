@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
+import torchinfo
 
 import bow.bow_utils as utils
 import vicreg.utils as vic_utils
@@ -24,6 +25,7 @@ from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+import torch_geometric.nn as gnn
 
 
 @torch.no_grad()
@@ -107,6 +109,7 @@ class PCLROBoW(pl.LightningModule):
                  clr_loss: bool,
                  bow_clr: bool,
                  clr_on_bow: bool,
+                 graph_conv_opts: dict,
                  vicreg_opts: dict,
                  optim: str = 'adam',
                  alpha=.99,
@@ -142,6 +145,7 @@ class PCLROBoW(pl.LightningModule):
         # if isinstance(feature_extractor, ResNet):
         num_channels = feature_extractor.num_channels
         self.feature_extractor = feature_extractor
+        # print(torchinfo.summary(feature_extractor, input_size=(64, 3, 84, 84)))
         self.num_words = bow_extractor_opts["num_words"]
 
         bow_extractor_opts_list = self.bow_opts_converter(bow_extractor_opts, bow_levels, num_channels)[
@@ -174,7 +178,7 @@ class PCLROBoW(pl.LightningModule):
         self.bow_predictor = BoWPredictor(**bow_predictor_opts)
 
         # Building teacher network
-        if not clr_on_bow:
+        if not clr_on_bow and not graph_conv_opts["use_graph_conv"]:  # TODO: edge_conv only on one network for now
             # CLR on BoW to be implemented as just one network
             self.feature_extractor_teacher = copy.deepcopy(self.feature_extractor)
             for param, param_teacher in zip(self.feature_extractor.parameters(),
@@ -222,7 +226,14 @@ class PCLROBoW(pl.LightningModule):
         self.ft_freeze_backbone = ft_freeze_backbone
         self.finetune_batch_norm = finetune_batch_norm
 
-        # MoCo params
+        self.graph_conv = graph_conv_opts["use_graph_conv"]
+
+        if self.graph_conv:
+            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, 84, 84)).shape
+            self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
+            self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
+
+            # MoCo params
         self.moco_opts = moco_opts
         if moco_opts["use_moco"]:
             self.K = moco_opts['K']
@@ -499,6 +510,15 @@ class PCLROBoW(pl.LightningModule):
         return losses, logs, feats
 
     @torch.enable_grad()
+    def _gcn_forward(self, x_support, y_support, x_query, y_query, ways):
+        z = self.feature_extractor(torch.cat([x_support, x_query]))
+        z = self.ec1(z)
+
+        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
+
+        return loss, acc, z
+
+    @torch.enable_grad()
     def _clr_on_bow_forward(self, x_support, y_support, x_query, y_query, ways):
         # x_query = [x_query]
         # Compute BoW representations for all images
@@ -571,10 +591,12 @@ class PCLROBoW(pl.LightningModule):
             losses, logs, z, output, target = self.forward(x_support, [x_query])
         elif self.clr_on_bow:
             loss, acc = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
+        elif self.graph_conv:
+            loss, acc, _ = self._gcn_forward(x_support, y_support, x_query, y_query, ways)
         else:
             losses, logs, z = self.forward(x_support, [x_query])
 
-        if not self.clr_on_bow:
+        if not self.clr_on_bow and not self.graph_conv:
             loss = losses.sum()
             self.log("bow_loss", loss.item(), prog_bar=True)
 

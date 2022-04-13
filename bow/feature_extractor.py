@@ -1,5 +1,4 @@
 import math
-
 import torch.nn as nn
 import torchvision.models as models
 
@@ -290,7 +289,8 @@ def conv3x3(in_channels, out_channels, maxpool=True, **kwargs):
 
 
 class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
-    def __init__(self, in_channels: int, out_channels=64, hidden_size=64, last_maxpool=True, global_pooling=True):
+    def __init__(self, in_channels: int, out_channels=64, hidden_size=64, last_maxpool=True, global_pooling=True,
+                 graph_conv=False):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_size = hidden_size
@@ -313,6 +313,9 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
         if global_pooling:
             feature_blocks.append(utils.GlobalPooling(type='avg'))
             all_feat_names.append('GlobalPooling')
+        if graph_conv:
+            feature_blocks.append(nn.Flatten())
+            all_feat_names.append('FinalFlatten')
         super(CNN_4Layer, self).__init__(all_feat_names, feature_blocks)
         self.num_channels = out_channels
 
