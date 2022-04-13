@@ -53,12 +53,12 @@ trainer:
   limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
-    logger:
-      class_path: pytorch_lightning.loggers.WandbLogger
-      init_args:
-        project: PCLR-OboW
-        save_dir: wandb_logs
-        log_model: True
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
