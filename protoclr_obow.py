@@ -621,7 +621,7 @@ class PCLROBoW(pl.LightningModule):
             acc = accuracy(output, target, top_k=5)
             self.log("moco_loss", mcl, prog_bar=True)
             loss += mcl
-        self.log_dict({'loss': loss.item()}, prog_bar=True)
+        self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True)
 
         return {"loss": loss, "accuracy": acc}  # accuracy return as 0 by default if CLR loss not used
 
