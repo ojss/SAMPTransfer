@@ -176,6 +176,7 @@ class PCLROBoW(pl.LightningModule):
             bow_predictor_opts["num_channels_in"] = [
                 d["num_channels"] for d in bow_extractor_opts_list]
             self.bow_predictor = BoWPredictor(**bow_predictor_opts)
+        if bow_clr or clr_on_bow:
             self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         # Building teacher network
@@ -756,7 +757,7 @@ class PCLROBoW(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
-        ec = None
+        ec = nn.Identity()
         original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
         if self.graph_conv:
             original_ec_state = copy.deepcopy(self.ec1.state_dict())
@@ -787,7 +788,7 @@ class PCLROBoW(pl.LightningModule):
         return loss.item(), acc
 
     def test_step(self, batch, batch_idx):
-        ec = None
+        ec = nn.Identity()
         original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
         if self.graph_conv:
             original_ec_state = copy.deepcopy(self.ec1.state_dict())
