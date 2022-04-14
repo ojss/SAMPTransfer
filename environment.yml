@@ -28,6 +28,7 @@ dependencies:
   - cython
   - colour
   - torchmetrics
-  - pip:
-      - torchmeta --install-option="--no-deps"
-      - submitit
+  - pip
+  - submitit
+#  - pip:
+#      - torchmeta --install-option="--no-deps"
