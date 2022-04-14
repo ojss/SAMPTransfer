@@ -62,7 +62,7 @@ trainer:
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: "./ckpts/"
+        dirpath: ./ckpts/${job_name}
         monitor: "val_accuracy"
         save_top_k: 10
         every_n_epochs: 1
@@ -78,7 +78,7 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
   n_support: 1
   n_query: 3
   batch_size: 64
