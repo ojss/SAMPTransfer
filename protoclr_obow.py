@@ -170,11 +170,13 @@ class PCLROBoW(pl.LightningModule):
         # Building the student network
         self.feature_extractor = feature_extractor
         assert "kappa" in bow_predictor_opts
-        bow_predictor_opts["num_channels_out"] = num_channels
-        bow_predictor_opts["num_channels_hidden"] = num_channels * 2
-        bow_predictor_opts["num_channels_in"] = [
-            d["num_channels"] for d in bow_extractor_opts_list]
-        self.bow_predictor = BoWPredictor(**bow_predictor_opts)
+        if bow_clr:
+            bow_predictor_opts["num_channels_out"] = num_channels
+            bow_predictor_opts["num_channels_hidden"] = num_channels * 2
+            bow_predictor_opts["num_channels_in"] = [
+                d["num_channels"] for d in bow_extractor_opts_list]
+            self.bow_predictor = BoWPredictor(**bow_predictor_opts)
+            self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         # Building teacher network
         if not clr_on_bow and not graph_conv_opts["use_graph_conv"]:  # TODO: edge_conv only on one network for now
@@ -184,8 +186,6 @@ class PCLROBoW(pl.LightningModule):
                                             self.feature_extractor_teacher.parameters()):
                 param_teacher.data.copy_(param.data)  # initialise with the same weights
                 param_teacher.requires_grad = False  # doesn't get updated by grades instead uses EWMA
-
-        self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         if num_classes is not None:
             self.linear_classifier = PredictionHead(

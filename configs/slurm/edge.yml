@@ -42,7 +42,7 @@ model:
       in_channels: 3
       hidden_size: 64
       out_channels: 64
-      global_pooling: False # TODO try with global avg pool
+      global_pooling: False
       graph_conv: ${model.graph_conv_opts.use_graph_conv}
 trainer:
   gpus: -1
