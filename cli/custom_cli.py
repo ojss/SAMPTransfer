@@ -50,3 +50,8 @@ class MyCLI(LightningCLI):
             default="",
             type=str,
             help="Comment to pass to scheduler, e.g. priority message")
+
+    def before_instantiate_classes(self):
+        config = self.config[self.subcommand]
+        logger = config.trainer.logger
+        del logger.init_args.agg_key_funcs, logger.init_args.agg_default_func
