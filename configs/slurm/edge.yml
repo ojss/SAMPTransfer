@@ -1,4 +1,4 @@
-job_name: edge_clr
+job_name: edge_clr-${uuid:}
 seed_everything: 72
 slurm:
   nodes: 1

@@ -5,17 +5,18 @@
 # LICENSE file in the root directory of this source tree.
 
 
-import argparse
-import submitit
-import os
 import uuid
 from pathlib import Path
 
-from cli import custom_cli
+import submitit
+from omegaconf import OmegaConf
+
 import protoclr_obow
+from cli import custom_cli
 from dataloaders import UnlabelledDataModule
 
 UUID = uuid.uuid4()
+OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
 
 
 def parse_args():
