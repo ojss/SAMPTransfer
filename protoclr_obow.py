@@ -10,10 +10,11 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch_geometric.nn as gnn
+import torchinfo
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
-import torchinfo
 
 import bow.bow_utils as utils
 import vicreg.utils as vic_utils
@@ -25,7 +26,6 @@ from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
                          prototypical_loss)
-import torch_geometric.nn as gnn
 
 
 @torch.no_grad()

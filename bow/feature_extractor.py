@@ -1,7 +1,7 @@
 import math
 import torch.nn as nn
 import torchvision.models as models
-import torch_geometric.nn as gnn
+
 from . import bow_utils as utils
 
 
