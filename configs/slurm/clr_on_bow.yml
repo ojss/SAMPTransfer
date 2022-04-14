@@ -24,6 +24,8 @@ model:
     use_vicreg: False
   moco_opts:
     use_moco: False
+  graph_conv_opts:
+    use_graph_conv: False
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10
