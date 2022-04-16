@@ -19,7 +19,7 @@ class MyCLI(LightningCLI):
         parser.link_arguments("data.batch_size", "model.batch_size")
         parser.link_arguments("data.n_support", "model.n_support")
         parser.link_arguments("data.n_query", "model.n_query")
-        parser.link_arguments("data.img_size_orig", "model.img_size_orig")
+        parser.link_arguments("data.img_size_orig", "model.img_orig_size")
 
         parser.add_argument("bow_extractor_opts.inv_delta", default=15)
         parser.add_argument("bow_extractor_opts.num_words", default=8192)

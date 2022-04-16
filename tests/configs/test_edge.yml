@@ -18,6 +18,7 @@ model:
     use_graph_conv: True
     k: 5
     aggregation: mean
+    mlp: False
   vicreg_opts:
     use_vicreg: False
   moco_opts:

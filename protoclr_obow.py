@@ -240,7 +240,7 @@ class PCLROBoW(pl.LightningModule):
             else:
                 self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
             self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
-            self.print(torchinfo.summary(feature_extractor, input_size=(64, 3, *img_orig_size)))
+            print(torchinfo.summary(feature_extractor, input_size=(64, 3, *img_orig_size)))
 
             # MoCo params
         self.moco_opts = moco_opts
