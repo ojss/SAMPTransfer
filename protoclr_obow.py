@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
 import torchinfo
+from omegaconf import OmegaConf
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
@@ -896,7 +897,8 @@ def cli_main():
     cli.trainer.test(datamodule=cli.datamodule)
 
 
-def slurm_main(conf_path):
+def slurm_main(conf_path, UUID):
+    OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
                 save_config_overwrite=True,
                 parser_kwargs={"parser_mode": "omegaconf", "default_config_files": conf_path})

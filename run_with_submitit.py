@@ -42,7 +42,7 @@ def main():
         slurm_additional_parameters=args["slurm_additional_parameters"]
     )
 
-    job = executor.submit(protoclr_obow.slurm_main, conf_path)
+    job = executor.submit(protoclr_obow.slurm_main, conf_path, UUID)
     print("Submitted job_id:", job.job_id)
 
 
