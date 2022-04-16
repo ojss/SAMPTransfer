@@ -17,6 +17,7 @@ import pytorch_lightning as pl
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from torchvision.datasets import ImageFolder
 from torch.utils.data.dataloader import default_collate
 from torchmeta.datasets.helpers import (omniglot, miniimagenet, tieredimagenet,
                                         cub, cifar_fs, doublemnist, triplemnist)
@@ -98,6 +99,45 @@ def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
                           collate_fn=collate_fn,
                           num_workers=num_workers,
                           pin_memory=torch.cuda.is_available())
+
+
+class ULDS(ImageFolder):
+    def __init__(self, datapath, split, transform=None,
+                 n_support=1, n_query=1, n_images=None, n_classes=None,
+                 no_aug_support=False, no_aug_query=False, img_size_orig=(224, 224), img_size_crop=(84, 84)):
+        super(ULDS, self).__init__(datapath)
+        self.n_support = n_support
+        self.n_query = n_query
+        self.split = split
+        self.n_images = n_images
+        self.n_classes = n_classes
+        self.no_aug_support = no_aug_support
+        self.no_aug_query = no_aug_query
+        self.img_size_orig = img_size_orig
+        self.img_size_crop = img_size_crop
+        self.transform = get_custom_transform(self.img_size_crop)
+        self.original_transform = identity_transform(self.img_size_orig)
+
+    def __getitem__(self, idx):
+        path, _ = self.samples[idx]
+        image = self.loader(path)
+        view_list = []
+        originals = []
+        for _ in range(self.n_support):
+            if not self.no_aug_support:
+                originals.append(self.transform(image).unsqueeze(0))
+            else:
+                assert self.n_support == 1
+                originals.append(self.original_transform(image).unsqueeze(0))
+
+        for _ in range(self.n_query):
+            if not self.no_aug_query:
+                view_list.append(self.transform(image).unsqueeze(0))
+            else:
+                assert self.n_query == 1
+                view_list.append(self.original_transform(image).unsqueeze(0))
+
+        return dict(origs=torch.cat(originals), views=torch.cat(view_list))
 
 
 # Cell
@@ -267,7 +307,7 @@ def identity_transform(img_shape):
 # Cell
 
 class UnlabelledDataModule(pl.LightningDataModule):
-    def __init__(self, dataset, datapath, split, transform=None,
+    def __init__(self, dataset, datapath, split, transform=None, full_size_path=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None, batch_size=50, num_workers=8,
                  seed=10, no_aug_support=False, no_aug_query=False, merge_train_val=True, mode='val',
                  eval_ways=5, eval_support_shots=5, eval_query_shots=15, img_size_orig=(224, 224),
@@ -289,6 +329,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
         # Get the data or paths
         self.dataset = dataset
         self.datapath = datapath
+        self.full_size_path = full_size_path
 
         self.mode = mode
 
@@ -301,26 +342,33 @@ class UnlabelledDataModule(pl.LightningDataModule):
         self.kwargs = kwargs
 
     def setup(self, stage=None):
-        self.dataset_train = UnlabelledDataset(self.dataset,
-                                               self.datapath, split='train',
-                                               transform=None,
-                                               n_images=self.n_images,
-                                               n_classes=self.n_classes,
-                                               n_support=self.n_support,
-                                               n_query=self.n_query,
-                                               no_aug_support=self.no_aug_support,
-                                               no_aug_query=self.no_aug_query,
-                                               img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
-        if self.merge_train_val:
-            dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
-                                            transform=None,
-                                            n_support=self.n_support,
-                                            n_query=self.n_query,
-                                            no_aug_support=self.no_aug_support,
-                                            no_aug_query=self.no_aug_query,
-                                            img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
+        if self.img_size_orig == [224, 224]:
+            self.dataset_train = ULDS(self.full_size_path, split='train', transform=None, n_images=self.n_images,
+                                      n_classes=self.n_classes, n_support=self.n_support, n_query=self.n_query,
+                                      no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
+                                      img_size_crop=self.img_size,
+                                      img_size_orig=self.img_size_orig)
+        else:
+            self.dataset_train = UnlabelledDataset(self.dataset,
+                                                   self.datapath, split='train',
+                                                   transform=None,
+                                                   n_images=self.n_images,
+                                                   n_classes=self.n_classes,
+                                                   n_support=self.n_support,
+                                                   n_query=self.n_query,
+                                                   no_aug_support=self.no_aug_support,
+                                                   no_aug_query=self.no_aug_query,
+                                                   img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
+            if self.merge_train_val:
+                dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
+                                                transform=None,
+                                                n_support=self.n_support,
+                                                n_query=self.n_query,
+                                                no_aug_support=self.no_aug_support,
+                                                no_aug_query=self.no_aug_query,
+                                                img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
 
-            self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
+                self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
 
     def train_dataloader(self):
         dataloader_train = DataLoader(self.dataset_train,
