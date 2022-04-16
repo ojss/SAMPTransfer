@@ -1,7 +1,7 @@
 __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
-from typing import Optional
+from typing import Optional, Iterable
 
 import math
 import numpy as np
@@ -111,6 +111,7 @@ class PCLROBoW(pl.LightningModule):
                  clr_on_bow: bool,
                  graph_conv_opts: dict,
                  vicreg_opts: dict,
+                 img_orig_size: Iterable,
                  optim: str = 'adam',
                  alpha=.99,
                  num_classes=None,
@@ -229,7 +230,7 @@ class PCLROBoW(pl.LightningModule):
         self.graph_conv = graph_conv_opts["use_graph_conv"]
 
         if self.graph_conv:
-            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, 84, 84)).shape
+            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).shape
             if graph_conv_opts["mlp"]:
                 self.fc1 = nn.Sequential(
                     nn.Linear(in_features=in_dim * 2, out_features=in_dim * 2),
@@ -239,8 +240,7 @@ class PCLROBoW(pl.LightningModule):
             else:
                 self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
             self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
-            # self.feature_extractor.add_module('edge_conv', self.ec1)
-            print(torchinfo.summary(feature_extractor, input_size=(64, 3, 84, 84)))
+            self.print(torchinfo.summary(feature_extractor, input_size=(64, 3, *img_orig_size)))
 
             # MoCo params
         self.moco_opts = moco_opts
