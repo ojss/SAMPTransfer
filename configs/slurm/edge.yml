@@ -25,6 +25,7 @@ model:
     use_graph_conv: True
     k: 5
     aggregation: mean
+    mlp: False
   vicreg_opts:
     use_vicreg: False
   moco_opts:
@@ -46,6 +47,7 @@ model:
       graph_conv: ${model.graph_conv_opts.use_graph_conv}
 trainer:
   gpus: -1
+  accumulate_grad_batches: 2
   num_sanity_val_steps: 2
   fast_dev_run: False
   max_epochs: 2500
