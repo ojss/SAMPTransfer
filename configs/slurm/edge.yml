@@ -81,6 +81,7 @@ trainer:
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
   n_support: 1
   n_query: 3
   batch_size: 64

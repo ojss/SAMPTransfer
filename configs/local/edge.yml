@@ -40,7 +40,7 @@ model:
       graph_conv: ${model.graph_conv_opts.use_graph_conv}
 trainer:
   gpus: -1
-  num_sanity_val_steps: 2
+  num_sanity_val_steps: 0
   fast_dev_run: 0
   max_epochs: 1500
   limit_train_batches: 100
@@ -73,12 +73,13 @@ trainer:
 data:
   dataset: "miniimagenet"
   #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/miniimagenet
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  full_size_path: /home/ojass/projects/data/processed_images/
   #  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
   n_support: 1
   n_query: 3
   batch_size: 64
   num_workers: 0
-  img_size_orig: [ 84, 84 ]
-  img_size_crop: [ 84, 84 ]
+  img_size_orig: [ 224, 224 ]
+  img_size_crop: [ 224, 224 ]
   no_aug_support: True

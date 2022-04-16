@@ -1,4 +1,4 @@
-job_name: clr_on_bow
+job_name: clr_on_bow-${uuid:}
 slurm:
   nodes: 1
   timeout: 8
@@ -78,10 +78,11 @@ trainer:
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
   n_support: 1
   n_query: 3
   batch_size: 64
   num_workers: 6
-  img_size_orig: [ 84, 84 ]
-  img_size_crop: [ 84, 84 ]
+  img_size_orig: [ 224, 224 ]
+  img_size_crop: [ 224, 224 ]
   no_aug_support: True
