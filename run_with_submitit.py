@@ -6,6 +6,8 @@ import sys
 from omegaconf import OmegaConf
 
 import protoclr_obow
+from cli import custom_cli
+from dataloaders import UnlabelledDataModule
 
 UUID = uuid.uuid4()
 OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
@@ -18,17 +20,25 @@ def parse_args():
     return conf, path
 
 
+def get_objs():
+    cli = custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule, run=False,
+                           save_config_overwrite=True,
+                           parser_kwargs={"parser_mode": "omegaconf"})
+    return cli
+
+
 def main():
-    conf, conf_path = parse_args()
-    args = conf["slurm"]
+    # conf, conf_path = parse_args()
+    cli = get_objs()
+    args = cli.config["slurm"]
     ngpus = int(args["slurm_additional_parameters"]["gres"][-1])
-    exp_dir = Path(f'./expts/{conf["job_name"]}')
+    exp_dir = Path(f'./expts/{cli.config["job_name"]}')
 
     exp_dir.mkdir(parents=True, exist_ok=True)
     executor = submitit.AutoExecutor(folder=exp_dir)
 
     executor.update_parameters(
-        name=conf["job_name"],
+        name=cli.config["job_name"],
         # gpus_per_node=args["ngpus"],
         mem_gb=12 * ngpus,
         tasks_per_node=ngpus,
@@ -42,7 +52,8 @@ def main():
         slurm_additional_parameters=args["slurm_additional_parameters"]
     )
 
-    job = executor.submit(protoclr_obow.slurm_main, conf_path, UUID)
+    # job = executor.submit(protoclr_obow.slurm_main, conf_path, UUID)
+    job = executor.submit(protoclr_obow.slurm_main, cli.trainer, cli.model, cli.datamodule)
     print("Submitted job_id:", job.job_id)
 
 

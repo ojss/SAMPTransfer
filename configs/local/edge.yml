@@ -40,7 +40,7 @@ model:
       graph_conv: ${model.graph_conv_opts.use_graph_conv}
 trainer:
   gpus: -1
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: 1
   fast_dev_run: 0
   max_epochs: 1500
   limit_train_batches: 100
