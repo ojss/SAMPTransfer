@@ -901,7 +901,7 @@ def slurm_main(conf_path, UUID):
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
                 save_config_overwrite=True,
-                parser_kwargs={"parser_mode": "omegaconf", "default_config_files": conf_path})
+                parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
     cli.trainer.fit(cli.model, cli.datamodule)
     cli.trainer.test(datamodule=cli.datamodule)
 
