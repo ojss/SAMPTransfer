@@ -1,44 +1,34 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-
 import uuid
 from pathlib import Path
 
 import submitit
+import sys
 from omegaconf import OmegaConf
 
 import protoclr_obow
-from cli import custom_cli
-from dataloaders import UnlabelledDataModule
 
 UUID = uuid.uuid4()
 OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
 
 
 def parse_args():
-    cli = custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule,
-                           run=False,
-                           save_config_overwrite=True,
-                           save_config_filename=str(UUID),
-                           parser_kwargs={"parser_mode": "omegaconf"})
-    return cli
+    # TODO make this nicer somehow
+    path = sys.argv[2]
+    conf = OmegaConf.load(path)
+    return conf, path
 
 
 def main():
-    cli = parse_args()
-    args = cli.config["slurm"]
+    conf, conf_path = parse_args()
+    args = conf["slurm"]
     ngpus = int(args["slurm_additional_parameters"]["gres"][-1])
-    exp_dir = Path(f'./expts/{str(UUID)}')
+    exp_dir = Path(f'./expts/{conf["job_name"]}')
 
     exp_dir.mkdir(parents=True, exist_ok=True)
     executor = submitit.AutoExecutor(folder=exp_dir)
 
     executor.update_parameters(
-        name=cli.config["job_name"],
+        name=conf["job_name"],
         # gpus_per_node=args["ngpus"],
         mem_gb=12 * ngpus,
         tasks_per_node=ngpus,
@@ -52,7 +42,7 @@ def main():
         slurm_additional_parameters=args["slurm_additional_parameters"]
     )
 
-    job = executor.submit(protoclr_obow.slurm_main, cli)
+    job = executor.submit(protoclr_obow.slurm_main, conf_path)
     print("Submitted job_id:", job.job_id)
 
 

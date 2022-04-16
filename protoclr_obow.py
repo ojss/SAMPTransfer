@@ -896,8 +896,10 @@ def cli_main():
     cli.trainer.test(datamodule=cli.datamodule)
 
 
-def slurm_main(cli):
-    cli.instantiate_classes()
+def slurm_main(conf_path):
+    cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
+                save_config_overwrite=True,
+                parser_kwargs={"parser_mode": "omegaconf", "default_config_files": conf_path})
     cli.trainer.fit(cli.model, cli.datamodule)
     cli.trainer.test(datamodule=cli.datamodule)
 

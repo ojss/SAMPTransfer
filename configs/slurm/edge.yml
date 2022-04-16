@@ -3,6 +3,10 @@ seed_everything: 72
 slurm:
   nodes: 1
   timeout: 8
+  # TODO: add new keys to other files
+  partition: general
+  constraint: ""
+  comment: ""
   slurm_additional_parameters:
     qos: medium
     gres: gpu:a40:1
