@@ -230,7 +230,14 @@ class PCLROBoW(pl.LightningModule):
 
         if self.graph_conv:
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, 84, 84)).shape
-            self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
+            if graph_conv_opts["mlp"]:
+                self.fc1 = nn.Sequential(
+                    nn.Linear(in_features=in_dim * 2, out_features=in_dim * 2),
+                    nn.ReLU(),
+                    nn.Linear(in_features=in_dim * 2, out_features=in_dim)
+                )
+            else:
+                self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
             self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
             # self.feature_extractor.add_module('edge_conv', self.ec1)
             print(torchinfo.summary(feature_extractor, input_size=(64, 3, 84, 84)))
@@ -646,14 +653,14 @@ class PCLROBoW(pl.LightningModule):
 
         x_b_i = x_query_var
         x_a_i = x_support_var
-        encoder.eval()
 
+        encoder.eval()
         z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1)
         encoder.train()
 
         if self.graph_conv and ec is not None:
             ec.eval()
-            ec(z_a_i)
+            z_a_i = ec(z_a_i)
             ec.train()
 
         # Define linear classifier
