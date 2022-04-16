@@ -141,3 +141,5 @@ cython_debug/
 .idea/
 /lightning_logs/
 /ckpts
+wandb_logs/
+expts/
