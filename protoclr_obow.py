@@ -1,6 +1,7 @@
 __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
+import os.path
 from typing import Optional, Iterable
 
 import math
@@ -910,17 +911,17 @@ def cli_main():
     cli.trainer.test(datamodule=cli.datamodule)
 
 
-# def slurm_main(conf_path, UUID):
-#     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
-#     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
-#                 save_config_overwrite=True,
-#                 parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
-#     cli.trainer.fit(cli.model, cli.datamodule)
-#     cli.trainer.test(datamodule=cli.datamodule)
-
-def slurm_main(trainer, model, datamodule):
-    trainer.fit(model, datamodule)
-    trainer.test(datamodule=datamodule)
+def slurm_main(conf_path, UUID):
+    OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
+    cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
+                save_config_overwrite=True,
+                save_config_filename=str(UUID),
+                parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
+    cli.trainer.fit(cli.model, cli.datamodule)
+    cli.trainer.test(datamodule=cli.datamodule)
+    # deleting tmp config file:
+    if os.path.isfile(conf_path):
+        os.remove(conf_path)
 
 
 if __name__ == "__main__":
