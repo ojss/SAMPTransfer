@@ -1,11 +1,36 @@
+from typing import Optional, Type, Union, Callable, Dict, Any
+
 import pytorch_lightning as pl
 from jsonargparse import lazy_instance
-from pytorch_lightning.utilities.cli import LightningCLI
+from pytorch_lightning import LightningDataModule, LightningModule, Trainer
+from pytorch_lightning.utilities.cli import LightningCLI, SaveConfigCallback
 
 from bow.feature_extractor import CNN_4Layer
 
 
 class MyCLI(LightningCLI):
+    def __init__(self, model_class: Optional[Union[Type[LightningModule], Callable[..., LightningModule]]] = None,
+                 datamodule_class: Optional[
+                     Union[Type[LightningDataModule], Callable[..., LightningDataModule]]] = None,
+                 save_config_callback: Optional[Type[SaveConfigCallback]] = SaveConfigCallback,
+                 save_config_filename: str = "config.yaml",
+                 save_config_overwrite: bool = True,
+                 save_config_multifile: bool = False,
+                 trainer_class: Union[Type[Trainer], Callable[..., Trainer]] = Trainer,
+                 trainer_defaults: Optional[Dict[str, Any]] = None,
+                 seed_everything_default: Optional[int] = None,
+                 description: str = "pytorch-lightning trainer command line tool",
+                 env_prefix: str = "PL",
+                 env_parse: bool = False,
+                 parser_kwargs: Optional[Union[Dict[str, Any], Dict[str, Dict[str, Any]]]] = None,
+                 subclass_mode_model: bool = False,
+                 subclass_mode_data: bool = False,
+                 run: bool = True, ):
+        super(MyCLI, self).__init__(model_class, datamodule_class, save_config_callback, save_config_filename,
+                                    save_config_overwrite, save_config_multifile,
+                                    trainer_class, trainer_defaults, seed_everything_default, description, env_prefix,
+                                    env_parse, parser_kwargs, subclass_mode_model, subclass_mode_data, run)
+
     def add_arguments_to_parser(self, parser: pl.utilities.cli.LightningArgumentParser):
         # DEFAULTS
         parser.set_defaults(

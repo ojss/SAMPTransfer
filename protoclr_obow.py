@@ -229,6 +229,7 @@ class PCLROBoW(pl.LightningModule):
         self.finetune_batch_norm = finetune_batch_norm
 
         self.graph_conv = graph_conv_opts["use_graph_conv"]
+        self.graph_conv_opts = graph_conv_opts
 
         if self.graph_conv:
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).shape
@@ -655,14 +656,26 @@ class PCLROBoW(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
 
-        encoder.eval()
-        z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1)
-        encoder.train()
-
-        if self.graph_conv and ec is not None:
+        if self.graph_conv and ec is not None and not self.graph_conv_opts["task_adapt"]:
+            encoder.eval()
             ec.eval()
+            z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1))
             z_a_i = ec(z_a_i)
             ec.train()
+            encoder.train()
+        elif self.graph_conv and ec is not None and self.graph_conv_opts["task_adapt"]:
+            encoder.eval()
+            ec.eval()
+            x = torch.cat([x_a_i, x_b_i])
+            z_a_i = encoder(x).flatten(1)
+            z_a_i = ec(z_a_i)
+            z_a_i = z_a_i[:support_size, :]
+            ec.train()
+            encoder.train()
+        else:
+            encoder.eval()
+            z_a_i = encoder(x_a_i).flatten()
+            encoder.train()
 
         # Define linear classifier
         input_dim = z_a_i.shape[1]
