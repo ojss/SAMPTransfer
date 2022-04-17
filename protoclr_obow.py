@@ -3,7 +3,8 @@ __all__ = ['Classifier', 'PCLROBoW']
 import copy
 import os.path
 from typing import Optional, Iterable
-
+from itertools import starmap
+import einops
 import math
 import numpy as np
 import pl_bolts.optimizers
@@ -28,6 +29,7 @@ from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from self_attention import SelfAttention
 
 
 @torch.no_grad()
@@ -233,16 +235,33 @@ class PCLROBoW(pl.LightningModule):
         self.graph_conv_opts = graph_conv_opts
 
         if self.graph_conv:
-            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).shape
+            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
             if graph_conv_opts["mlp"]:
                 self.fc1 = nn.Sequential(
                     nn.Linear(in_features=in_dim * 2, out_features=in_dim * 2),
                     nn.ReLU(),
                     nn.Linear(in_features=in_dim * 2, out_features=in_dim)
                 )
-            else:
-                self.fc1 = nn.Linear(in_features=in_dim * 2, out_features=in_dim)
-            self.ec1 = gnn.DynamicEdgeConv(self.fc1, k=graph_conv_opts['k'], aggr=graph_conv_opts["aggregation"])
+            elif gr_mscale_opts := graph_conv_opts["m_scale"]:
+                feats = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size), self._bow_levels)
+                _, coarse_in_dim = feats[0].flatten(1).shape
+                _, fine_in_dim = feats[1].flatten(1).shape
+
+                if gr_mscale_opts["attn_pooling"]:
+                    self.sc = nn.ModuleList(
+                        [nn.Linear(in_features=coarse_in_dim, out_features=gr_mscale_opts["m_scale_projector_dim"]),
+                         nn.Linear(in_features=fine_in_dim, out_features=gr_mscale_opts["m_scale_projector_dim"])])
+
+                    self.sa = SelfAttention(gr_mscale_opts["m_scale_projector_dim"] * 2,
+                                            heads=gr_mscale_opts["heads"],
+                                            dim_head=gr_mscale_opts["attn_inner_dim"])
+                    self.ec = nn.ModuleList([gnn.DynamicEdgeConv(
+                        nn.Linear(in_features=gr_mscale_opts["m_scale_projector_dim"] * 2 * 2,
+                                  out_features=gr_mscale_opts["m_scale_projector_dim"] * 2),
+                        k=graph_conv_opts["k"],
+                        aggr=graph_conv_opts["aggregation"]
+                    )])
+
             print(torchinfo.summary(feature_extractor, input_size=(64, 3, *img_orig_size)))
 
             # MoCo params
@@ -523,9 +542,12 @@ class PCLROBoW(pl.LightningModule):
 
     @torch.enable_grad()
     def _gcn_forward(self, x_support, y_support, x_query, y_query, ways):
-        z = self.feature_extractor(torch.cat([x_support, x_query]))
-        z = self.ec1(z)
-
+        z = self.feature_extractor(torch.cat([x_support, x_query]), self._bow_levels)
+        z = starmap(lambda t, l: l(t.flatten(1)), zip(z, self.sc))
+        z = torch.cat(list(z), dim=-1)
+        z = einops.rearrange(z, "b e -> 1 b e")
+        z = self.sa(z)
+        z = einops.rearrange(z, "1 b e -> b e")
         loss, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
 
         return loss, acc, z
@@ -638,7 +660,7 @@ class PCLROBoW(pl.LightningModule):
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
                               freeze_backbone=False, finetune_batch_norm=False,
-                              inner_lr=0.001, total_epoch=15, n_way=5, ec=None):
+                              inner_lr=0.001, total_epoch=15, n_way=5, ec=None, sc=None, sa=None):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -657,7 +679,8 @@ class PCLROBoW(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
 
-        if self.graph_conv and ec is not None and not self.graph_conv_opts["task_adapt"]:
+        if self.graph_conv and ec is not None and not self.graph_conv_opts["task_adapt"] and not \
+                self.graph_conv_opts["m_scale"]["use_m_scale"]:
             encoder.eval()
             ec.eval()
             z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1))
@@ -672,6 +695,21 @@ class PCLROBoW(pl.LightningModule):
             z_a_i = ec(z_a_i)
             z_a_i = z_a_i[:support_size, :]
             ec.train()
+            encoder.train()
+        elif self.graph_conv and ec is not None and self.graph_conv_opts["m_scale"]["use_m_scale"]:
+            encoder.eval()
+            ec.eval()
+            sa.eval()
+            sc.eval()
+            z_a_i = encoder(x_a_i, self._bow_levels)
+            z_a_i = starmap(lambda t, l: l(t.flatten(1)), zip(z_a_i, sc))
+            z_a_i = torch.cat(list(z_a_i), dim=-1)
+            z_a_i = einops.rearrange(z_a_i, "b e -> 1 b e")
+            z_a_i = sa(z_a_i)
+            z_a_i = einops.rearrange(z_a_i, "1 b e -> b e")
+            ec.train()
+            sa.train()
+            sc.train()
             encoder.train()
         else:
             encoder.eval()
@@ -698,6 +736,9 @@ class PCLROBoW(pl.LightningModule):
             encoder.train()
         else:
             encoder.eval()
+            ec.eval()
+            sa.eval()
+            sc.eval()
         classifier.train()
         if not finetune_batch_norm:
             for module in encoder.modules():
@@ -720,8 +761,12 @@ class PCLROBoW(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
                 #####################################
 
-                output = encoder(z_batch).flatten(1)
-                output = ec(output)
+                output = encoder(z_batch, self._bow_levels)
+                output = starmap(lambda t, l: l(t.flatten(1)), zip(output, sc))
+                output = torch.cat(list(output), dim=-1)
+                output = einops.rearrange(output, "b e -> 1 b e")
+                output = sa(output)
+                output = einops.rearrange(output, "1 b e -> b e")
                 output = classifier(output)
                 loss = loss_fn(output, y_batch)
 
@@ -734,9 +779,15 @@ class PCLROBoW(pl.LightningModule):
                     delta_opt.step()
         classifier.eval()
         encoder.eval()
+        sa.eval()
+        sc.eval()
 
-        output = encoder(x_b_i.to(self.device)).flatten(1)
-        output = ec(output)
+        output = encoder(x_b_i, self._bow_levels)
+        output = starmap(lambda t, l: l(t.flatten(1)), zip(output, sc))
+        output = torch.cat(list(output), dim=-1)
+        output = einops.rearrange(output, "b e -> 1 b e")
+        output = sa(output)
+        output = einops.rearrange(output, "1 b e -> b e")
         scores = classifier(output)
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
@@ -779,11 +830,7 @@ class PCLROBoW(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
-        ec = nn.Identity()
-        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
-        if self.graph_conv:
-            original_ec_state = copy.deepcopy(self.ec1.state_dict())
-            ec = self.ec1
+        original_encoder_state = copy.deepcopy(self.state_dict())
 
         if self.sup_finetune:
             loss, acc = self.supervised_finetuning(self.feature_extractor,
@@ -794,10 +841,9 @@ class PCLROBoW(pl.LightningModule):
                                                    finetune_batch_norm=self.finetune_batch_norm,
                                                    device=self.device,
                                                    n_way=self.eval_ways,
-                                                   ec=ec)
-            self.feature_extractor.load_state_dict(original_encoder_state)
-            if self.graph_conv:
-                self.ec1.load_state_dict(original_ec_state)
+                                                   ec=self.ec, sc=self.sc, sa=self.sa)
+            self.load_state_dict(original_encoder_state)
+
         elif not self.sup_finetune:
             with torch.no_grad():
                 loss, acc = self.std_proto_form(batch, batch_idx)
@@ -811,10 +857,7 @@ class PCLROBoW(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         ec = nn.Identity()
-        original_encoder_state = copy.deepcopy(self.feature_extractor.state_dict())
-        if self.graph_conv:
-            original_ec_state = copy.deepcopy(self.ec1.state_dict())
-            ec = self.ec1
+        original_encoder_state = copy.deepcopy(self.state_dict())
         if self.sup_finetune:
             loss, acc = self.supervised_finetuning(
                 self.feature_extractor,
@@ -828,9 +871,7 @@ class PCLROBoW(pl.LightningModule):
                 ec=ec
             )
             torch.cuda.empty_cache()
-            self.feature_extractor.load_state_dict(original_encoder_state)
-            if self.graph_conv:
-                self.ec1.load_state_dict(original_ec_state)
+            self.load_state_dict(original_encoder_state)
         else:
             # Note: this is just using the standard protonet form
             with torch.no_grad():

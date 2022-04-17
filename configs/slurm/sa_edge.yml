@@ -1,5 +1,16 @@
-job_name: local_test
+job_name: sa_edge_clr-${uuid:}
 seed_everything: 72
+slurm:
+  nodes: 1
+  timeout: 8
+  # TODO: add new keys to other files
+  partition: general
+  constraint: ""
+  comment: ""
+  slurm_additional_parameters:
+    qos: medium
+    gres: gpu:a40:1
+    signal: SIGUSR1@90
 model:
   optim: "adam"
   lr_sch: "step"
@@ -10,7 +21,7 @@ model:
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 0.0001
-  alpha_cosine: True
+  alpha_cosine: False
   bow_clr: False
   clr_loss: False
   clr_on_bow: False
@@ -48,27 +59,28 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
+  accumulate_grad_batches: 2
   num_sanity_val_steps: 2
-  fast_dev_run: 1
-  max_epochs: 1500
+  fast_dev_run: False
+  max_epochs: 2500
+  min_epochs: 300
   limit_train_batches: 100
   limit_val_batches: 15
-  #  logger:
-  #    class_path: pytorch_lightning.loggers.WandbLogger
-  #    init_args:
-  #      name: test2
-  #      project: PCLR-OboW
-  #      save_dir: wandb_logs
-  #      log_model: True
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: "./ckpts/"
+        dirpath: ./ckpts/${job_name}
         monitor: "val_accuracy"
         save_top_k: 10
         every_n_epochs: 1
         mode: "max"
-
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
@@ -77,17 +89,18 @@ trainer:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "step"
+    - class_path: callbacks.ConfidenceIntervalCallback
+      init_args:
+        log_to_wb: True
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-  #  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 0
+  num_workers: 6
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True
