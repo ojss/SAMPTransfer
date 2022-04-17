@@ -21,7 +21,9 @@ def parse_args():
 
 
 def get_objs():
-    cli = custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule, run=False,
+    cli = custom_cli.MyCLI(protoclr_obow.PCLROBoW, UnlabelledDataModule,
+                           run=False,
+                           save_config_filename=str(UUID),
                            save_config_overwrite=True,
                            parser_kwargs={"parser_mode": "omegaconf"})
     return cli
