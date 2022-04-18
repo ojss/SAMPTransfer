@@ -26,6 +26,9 @@ from bow.feature_extractor import CNN_4Layer
 from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from fusion import AFF
+from graph.gnn_base import GNNReID
+from graph.graph_generator import GraphGenerator
+from losses import CrossEntropyLabelSmooth
 from proto_utils import (get_prototypes,
                          prototypical_loss)
 
@@ -112,6 +115,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_clr: bool,
                  clr_on_bow: bool,
                  graph_conv_opts: dict,
+                 mpnn_opts: dict,
                  vicreg_opts: dict,
                  img_orig_size: Iterable,
                  optim: str = 'adam',
@@ -129,13 +133,6 @@ class PCLROBoW(pl.LightningModule):
                  distance='euclidean',
                  mode='trainval',
                  eval_ways=5,
-                 # moco
-                 moco_opts: dict = dict(K=65536,
-                                        m=.999,
-                                        T=.07,
-                                        dim=128,
-                                        mlp=False,
-                                        ),
                  sup_finetune=True,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
@@ -183,7 +180,8 @@ class PCLROBoW(pl.LightningModule):
             self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         # Building teacher network
-        if not clr_on_bow and not graph_conv_opts["use_graph_conv"]:  # TODO: edge_conv only on one network for now
+        if not clr_on_bow and not graph_conv_opts["use_graph_conv"] and not mpnn_opts["_use"]:
+            # TODO: graph only on one network for now
             # CLR on BoW to be implemented as just one network
             self.feature_extractor_teacher = copy.deepcopy(self.feature_extractor)
             for param, param_teacher in zip(self.feature_extractor.parameters(),
@@ -252,42 +250,14 @@ class PCLROBoW(pl.LightningModule):
                         k=graph_conv_opts["k"],
                         aggr=graph_conv_opts["aggregation"]
                     )
+        self.mpnn_opts = mpnn_opts
+        if mpnn_opts["_use"]:
+            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+            self.gnn = GNNReID(self.device, mpnn_opts["gnn_params"], in_dim).to(self.device)
+            self.graph_generator = GraphGenerator(self.device, **mpnn_opts["graph_params"])
+            self.gnn_loss = CrossEntropyLabelSmooth(self.batch_size, dev=0)
 
-            # MoCo params
-        self.moco_opts = moco_opts
-        if moco_opts["use_moco"]:
-            self.K = moco_opts['K']
-            self.m = moco_opts['m']
-            self.T = moco_opts['T']
-            # create encoders
-            self.encoder_q = nn.Sequential(
-                # self.feature_extractor,
-                nn.Flatten(),
-                nn.Linear(feature_extractor.num_channels, moco_opts["dim"]),
-                nn.ReLU()
-            )
-
-            self.encoder_k = nn.Sequential(
-                # self.feature_extractor_teacher,
-                nn.Flatten(),
-                nn.Linear(self.feature_extractor_teacher.num_channels, moco_opts["dim"]),
-                nn.ReLU()
-            )
-
-            # block off gradients again
-            for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
-                param_k.data.copy_(param_q.data)
-                param_k.requires_grad = False  # because these guys need to be EWMAed as well just like the CNN
-            # create moco queue
-            self.register_buffer("queue", torch.randn(moco_opts["dim"], self.K))
-            self.queue = F.normalize(self.queue, dim=0)
-            self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
-        # self.example_input_array = [batch_size, 1, 28, 28] if dataset == 'omniglot'\
-        #     else [batch_size, 3, 84, 84]
-
-        # VICReg
         self.vicreg = vicreg_opts
-
         self.automatic_optimization = True
 
     def setup(self, stage: Optional[str] = None) -> None:
@@ -295,6 +265,21 @@ class PCLROBoW(pl.LightningModule):
             # try:
             # self._num_iterations = len(self.train_dataloader()) * self.trainer.max_epochs
             self._num_iterations = len(self.trainer.datamodule.train_dataloader()) * self.trainer.max_epochs
+
+    def mpnn_shared_step(self, x, y):
+        z = self.feature_extractor(x)
+        z = z.flatten(1)
+        edge_attr, edge_index, z = self.graph_generator.get_graph(z, y)
+        edge_index = edge_index.to(self.device)
+        edge_attr = edge_attr.to(self.device)
+        preds, z = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+
+        return preds, z
+
+    def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
+        _, z = self.mpnn_shared_step(torch.cat([x_support, x_query]), torch.cat([y_support, y_query], 1).squeeze())
+        loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query, ways, loss_fn=self.gnn_loss)
+        return loss, acc, z[0]
 
     @torch.no_grad()
     def _get_momentum_alpha(self):
@@ -343,15 +328,9 @@ class PCLROBoW(pl.LightningModule):
         self.log("alpha", alpha)
         if alpha >= 1.:
             return
-        if self.moco_opts["use_moco"]:
-            student_params = self.encoder_q.parameters()
-            teacher_params = self.encoder_k.parameters()
-        else:
-            student_params = self.feature_extractor.parameters()
-            teacher_params = self.feature_extractor_teacher.parameters()
+        student_params = self.feature_extractor.parameters()
+        teacher_params = self.feature_extractor_teacher.parameters()
         for param, param_teacher in zip(student_params, teacher_params):
-            # TODO: check if this works just the same for MoCo especially the param.detach part,
-            #  MoCo implementation doesn't have it
             param_teacher.data.mul_(alpha).add_(param.detach().data, alpha=(1. - alpha))
 
     @torch.no_grad()
@@ -483,9 +462,6 @@ class PCLROBoW(pl.LightningModule):
             self._update_teacher()
             bow_target, features_t = self.generate_bow_targets(x)
             perp_b, perp_i = compute_bow_perplexity(bow_target)
-            if self.moco_opts["use_moco"]:
-                k = self.encoder_k(self.feature_extractor_teacher(x))
-                k = F.normalize(k, dim=1)
 
         ######## COMPUTE BOW PREDICTION LOSSES #######
         losses = [self._bow_loss(pred, bow_target) for pred in bow_predictions]
@@ -501,31 +477,6 @@ class PCLROBoW(pl.LightningModule):
         else:
             features_o_stu = self.feature_extractor(x)
             feats = torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
-
-        if self.moco_opts["use_moco"]:
-            # compute query features
-            q = self.encoder_q(self.feature_extractor(x_prime[0]))
-            q = F.normalize(q, dim=1)
-
-            # compute logits
-            # einsum is faster
-            # positive logits: N x 1
-            l_pos = torch.einsum("nc, nc -> n", [q, k]).unsqueeze(-1)
-            # negative logits N x K
-            l_neg = torch.einsum("nc, ck -> nk", q, self.queue.clone().detach())
-
-            # logits: N x (1 + K)
-            logits = torch.cat([l_pos, l_neg], dim=1)
-
-            # apply temperature
-            logits /= self.T
-
-            # labels: positive key indicators
-            labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
-
-            # dequeue and enqueue
-            self._dequeue_and_enqueue(keys=k)
-            return losses, logs, feats, logits, labels
 
         return losses, logs, feats
 
@@ -565,7 +516,7 @@ class PCLROBoW(pl.LightningModule):
         loss, acc = prototypical_loss(z_proto, z_query_bow, y_query, distance=self.distance)
         return loss, acc
 
-    def calculate_protoclr_loss(self, z, y_support, y_query, ways):
+    def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy):
 
         #
         # e.g. [1,50*n_support,*(3,84,84)]
@@ -579,7 +530,7 @@ class PCLROBoW(pl.LightningModule):
             z_proto = get_prototypes(z_support, y_support, ways)
 
         loss, acc = prototypical_loss(z_proto, z_query, y_query,
-                                      distance=self.distance)
+                                      distance=self.distance, loss_fn=loss_fn)
         return loss, acc
 
     def training_step(self, batch, batch_idx):
@@ -620,16 +571,16 @@ class PCLROBoW(pl.LightningModule):
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
-        if self.moco_opts["use_moco"]:
-            losses, logs, z, output, target = self.forward(x_support, [x_query])
-        elif self.clr_on_bow:
+        if self.clr_on_bow:
             loss, acc = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
+        elif self.mpnn_opts["_use"]:
+            loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
         elif self.graph_conv:
             loss, acc, z = self.gcn_forward(x_support, y_support, x_query, y_query, ways)
         else:
             losses, logs, z = self.forward(x_support, [x_query])
 
-        if not self.clr_on_bow and not self.graph_conv:
+        if not self.clr_on_bow and not self.graph_conv and not self.mpnn_opts["_use"]:
             loss = losses.sum()
             self.log("bow_loss", loss.item(), prog_bar=True)
 
@@ -646,15 +597,10 @@ class PCLROBoW(pl.LightningModule):
             self.log("vc_loss", vcl.item(), prog_bar=True)
             loss += vcl
 
-        # MoCo loss implemented directly as CE loss instead of kl_div
-        if self.moco_opts["use_moco"]:
-            mcl = F.cross_entropy(output, target)
-            acc = accuracy(output, target, top_k=5)
-            self.log("moco_loss", mcl, prog_bar=True)
-            loss += mcl
         self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
 
-        return {"loss": loss, "accuracy": acc, "embeddings": z}  # accuracy return as 0 by default if CLR loss not used
+        return {"loss": loss, "accuracy": acc,
+                "embeddings": z.detach()}  # accuracy return as 0 by default if CLR loss not used
 
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
@@ -678,7 +624,7 @@ class PCLROBoW(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
 
-        if self.graph_conv and ec is not None and not self.graph_conv_opts["task_adapt"] and not \
+        if self.graph_conv and not self.graph_conv_opts["task_adapt"] and not \
                 self.graph_conv_opts["m_scale"]["use_m_scale"]:
             encoder.eval()
             ec.eval()
@@ -686,7 +632,7 @@ class PCLROBoW(pl.LightningModule):
             z_a_i = ec(z_a_i)
             ec.train()
             encoder.train()
-        elif self.graph_conv and ec is not None and self.graph_conv_opts["task_adapt"]:
+        elif self.graph_conv and self.graph_conv_opts["task_adapt"]:
             encoder.eval()
             ec.eval()
             x = torch.cat([x_a_i, x_b_i])
@@ -695,7 +641,7 @@ class PCLROBoW(pl.LightningModule):
             z_a_i = z_a_i[:support_size, :]
             ec.train()
             encoder.train()
-        elif self.graph_conv and ec is not None and self.graph_conv_opts["m_scale"]["use_m_scale"]:
+        elif self.graph_conv and self.graph_conv_opts["m_scale"]["use_m_scale"]:
             encoder.eval()
             fusion.train()
             ec.eval()
@@ -705,6 +651,10 @@ class PCLROBoW(pl.LightningModule):
             ec.train()
             fusion.train()
             encoder.train()
+        elif self.mpnn_opts["_use"]:
+            self.eval()
+            self.mpnn_shared_step(x_a_i, y_a_i)
+            self.train()
         else:
             encoder.eval()
             z_a_i = encoder(x_a_i).flatten()
@@ -729,9 +679,7 @@ class PCLROBoW(pl.LightningModule):
         if freeze_backbone is False:
             encoder.train()
         else:
-            encoder.eval()
-            ec.eval()
-            fusion.eval()
+            self.eval()
         classifier.train()
         if not finetune_batch_norm:
             for module in encoder.modules():
@@ -753,15 +701,17 @@ class PCLROBoW(pl.LightningModule):
                 z_batch = x_a_i[selected_id]
                 y_batch = y_a_i[selected_id]
                 #####################################
-
-                output = self._shared_gcn_step(
-                    encoder,
-                    fusion,
-                    ec,
-                    z_batch,
-                    None,
-                    mode="no_adapt"
-                )
+                if self.mpnn_opts["_use"]:
+                    _, output = self.mpnn_shared_step(z_batch, y_batch)
+                else:
+                    output = self._shared_gcn_step(
+                        encoder,
+                        fusion,
+                        ec,
+                        z_batch,
+                        None,
+                        mode="no_adapt"
+                    )
                 output = classifier(output)
                 loss = loss_fn(output, y_batch)
 
@@ -817,9 +767,13 @@ class PCLROBoW(pl.LightningModule):
         return loss, accuracy
 
     # TODO: check if validation is to be done with teacher or student
-    def validation_step(self, batch, batch_idx):
+
+    def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
+        ec = self.ec if hasattr(self, "ec") else nn.Identity()
+        fusion = self.fusion if hasattr(self, "fusion") else nn.Identity()
+
         original_encoder_state = copy.deepcopy(self.state_dict())
 
         if self.sup_finetune:
@@ -831,13 +785,17 @@ class PCLROBoW(pl.LightningModule):
                                                    finetune_batch_norm=self.finetune_batch_norm,
                                                    device=self.device,
                                                    n_way=self.eval_ways,
-                                                   ec=self.ec, fusion=self.fusion)
+                                                   ec=ec,
+                                                   fusion=fusion)
             self.load_state_dict(original_encoder_state)
 
         elif not self.sup_finetune:
             with torch.no_grad():
                 loss, acc = self.std_proto_form(batch, batch_idx)
+        return loss, acc
 
+    def validation_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
         self.log_dict({
             'val_loss': loss.detach(),
             'val_accuracy': acc
@@ -846,26 +804,7 @@ class PCLROBoW(pl.LightningModule):
         return loss.item(), acc
 
     def test_step(self, batch, batch_idx):
-        ec = nn.Identity()
-        original_encoder_state = copy.deepcopy(self.state_dict())
-        if self.sup_finetune:
-            loss, acc = self.supervised_finetuning(
-                self.feature_extractor,
-                episode=batch,
-                inner_lr=self.sup_finetune_lr,
-                total_epoch=self.sup_finetune_epochs,
-                freeze_backbone=self.ft_freeze_backbone,
-                finetune_batch_norm=self.finetune_batch_norm,
-                n_way=self.eval_ways,
-                device=self.device,
-                ec=ec, fusion=self.fusion
-            )
-            torch.cuda.empty_cache()
-            self.load_state_dict(original_encoder_state)
-        else:
-            # Note: this is just using the standard protonet form
-            with torch.no_grad():
-                loss, acc = self.std_proto_form(batch, batch_idx)
+        loss, acc = self._shared_eval_step(batch, batch_idx)
 
         self.log(
             "test_loss",

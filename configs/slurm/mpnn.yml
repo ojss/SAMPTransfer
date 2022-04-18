@@ -1,5 +1,16 @@
-job_name: local_test
+job_name: sa_edge_clr-${uuid:}
 seed_everything: 72
+slurm:
+  nodes: 1
+  timeout: 15
+  # TODO: add new keys to other files
+  partition: general
+  constraint: ""
+  comment: ""
+  slurm_additional_parameters:
+    qos: medium
+    gres: gpu:a40:1
+    signal: SIGUSR1@90
 model:
   optim: "adam"
   lr_sch: "step"
@@ -10,7 +21,7 @@ model:
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 0.0001
-  alpha_cosine: True
+  alpha_cosine: False
   bow_clr: False
   clr_loss: False
   clr_on_bow: False
@@ -61,7 +72,7 @@ model:
         use_batchnorm: 0
   vicreg_opts:
     use_vicreg: False
-  bow_levels: [ "block3", "block4" ]
+  bow_levels: [ "block3" ]
   bow_extractor_opts:
     inv_delta: 10
     num_words: 8192
@@ -78,51 +89,48 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
-  num_sanity_val_steps: 0
-  fast_dev_run: 1
-  max_epochs: 1500
+  accumulate_grad_batches: 2
+  num_sanity_val_steps: 2
+  fast_dev_run: False
+  max_epochs: 2500
+  min_epochs: 300
   limit_train_batches: 100
   limit_val_batches: 15
-  #  logger:
-  #    class_path: pytorch_lightning.loggers.WandbLogger
-  #    init_args:
-  #      project: testing
-  #      save_dir: wandb_logs
-  #      log_model: True
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
   callbacks:
-    - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
-      init_args:
-        max_depth: 3
-    #    - class_path: callbacks.EmbeddingLogger
-    #      init_args:
-    #        every_n_steps: 1
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: "./ckpts/"
-        monitor: "val_accuracy"
+        dirpath: ./ckpts/${job_name}
+        monitor: "train_accuracy_epoch"
         save_top_k: 10
         every_n_epochs: 1
         mode: "max"
-
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
-        monitor: "val_accuracy"
+        monitor: "train_accuracy_epoch"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "step"
+    - class_path: callbacks.ConfidenceIntervalCallback
+      init_args:
+        log_to_wb: True
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-  #  datapath: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 0
+  num_workers: 6
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True
