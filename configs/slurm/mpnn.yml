@@ -14,10 +14,10 @@ slurm:
 model:
   optim: "radam"
   lr_sch: "step"
-  warmup_start_lr: 0.0001563663718906821
+  warmup_start_lr: 1e-3
   warmup_epochs: 250
   eta_min: 5e-5
-  lr: 1e-3
+  lr: 0.0001563663718906821
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
