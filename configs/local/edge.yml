@@ -48,19 +48,24 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
-  num_sanity_val_steps: 2
-  fast_dev_run: 1
+  num_sanity_val_steps: 0
+  fast_dev_run: 0
   max_epochs: 1500
   limit_train_batches: 100
   limit_val_batches: 15
-  #  logger:
-  #    class_path: pytorch_lightning.loggers.WandbLogger
-  #    init_args:
-  #      name: test2
-  #      project: PCLR-OboW
-  #      save_dir: wandb_logs
-  #      log_model: True
+#  logger:
+#    class_path: pytorch_lightning.loggers.WandbLogger
+#    init_args:
+#      project: testing
+#      save_dir: wandb_logs
+#      log_model: True
   callbacks:
+    - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
+      init_args:
+        max_depth: 3
+#    - class_path: callbacks.EmbeddingLogger
+#      init_args:
+#        every_n_steps: 1
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"

@@ -1,3 +1,6 @@
+import copy
+from typing import Optional, Any
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
@@ -6,10 +9,50 @@ import wandb
 from scipy import stats
 from torchvision.utils import make_grid
 
-
 # Cell
+from protoclr_obow import PCLROBoW
+
+
 def get_train_images(ds, num):
     return torch.stack([ds[i]['data'][0] for i in range(num)], dim=0)
+
+
+class EmbeddingLogger(pl.Callback):
+    def __init__(self, every_n_steps=10):
+        super(EmbeddingLogger, self).__init__()
+        self.every_n_steps = every_n_steps
+
+    def on_train_batch_end(
+            self,
+            trainer: "pl.Trainer",
+            pl_module: PCLROBoW,
+            outputs,
+            batch: Any,
+            batch_idx: int,
+            unused: Optional[int] = 0,
+    ) -> None:
+        if trainer.global_step % self.every_n_steps == 0:
+            pl_module.eval()
+            z = copy.deepcopy(outputs["embeddings"])
+            ways = pl_module.batch_size
+            y_query = torch.arange(ways).unsqueeze(
+                0).unsqueeze(2)  # batch and shot dim
+            y_query = y_query.repeat(1, 1, pl_module.n_query)
+            y_query = y_query.view(1, -1).to(pl_module.device)
+
+            y_support = torch.arange(ways).unsqueeze(
+                0).unsqueeze(2)  # batch and shot dim
+            y_support = y_support.repeat(1, 1, pl_module.n_support)
+            y_support = y_support.view(1, -1).to(pl_module.device)
+            labels = torch.cat([y_support, y_query], dim=-1)
+            z = torch.cat([z, labels.T], dim=-1)
+            wandb.log({
+                "embeddings": wandb.Table(
+                    columns=[f"D{c}" for c in range(z.shape[-1])],
+                    data=z.cpu().tolist()
+                )
+            })
+            pl_module.train()
 
 
 class WandbImageCallback(pl.Callback):

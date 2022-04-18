@@ -77,14 +77,14 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: ./ckpts/${job_name}
-        monitor: "val_accuracy"
+        monitor: "train_accuracy_epoch"
         save_top_k: 10
         every_n_epochs: 1
         mode: "max"
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
-        monitor: "val_accuracy"
+        monitor: "train_accuracy_epoch"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
