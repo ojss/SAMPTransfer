@@ -534,7 +534,10 @@ class PCLROBoW(pl.LightningModule):
             z = feature_extractor(torch.cat([x_support, x_query]), self._bow_levels)
         else:
             z = feature_extractor(x_support, self._bow_levels)
-        z0 = F.avg_pool2d(z[0], 2)  # TODO: replace with padding and Laplacian graph method to check later
+        if self.graph_conv_opts["m_scale"]["resizing"] == 'avg':
+            z0 = F.avg_pool2d(z[0], 2)  # TODO: replace with padding and Laplacian graph method to check later
+        elif self.graph_conv_opts["m_scale"]["resizing"] == 'interpolate':
+            z0 = F.interpolate(z[0], scale_factor=.5)
         z1 = z[1]
         z = fusion(z1, z0)
         z = z.flatten(1)
@@ -751,7 +754,6 @@ class PCLROBoW(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
                 #####################################
 
-                output = encoder(z_batch, self._bow_levels)
                 output = self._shared_gcn_step(
                     encoder,
                     fusion,

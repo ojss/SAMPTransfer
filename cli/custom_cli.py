@@ -50,6 +50,7 @@ class MyCLI(LightningCLI):
         parser.add_argument("bow_extractor_opts.num_words", default=8192)
 
         parser.add_argument("bow_predictor_opts.kappa", default=8)
+        parser.add_argument("--graph_conv_opts.m_scale.resizing", default='avg')
 
         parser.add_argument("job_name", default="local_dev_run", type=str, help="Job name")
         parser.add_argument(

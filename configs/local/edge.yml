@@ -27,6 +27,7 @@ model:
       attn_inner_dim: 64
       heads: 1
       graph_conv: True
+      resizing: interpolate
   vicreg_opts:
     use_vicreg: False
   moco_opts:
@@ -48,7 +49,7 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: 2
   fast_dev_run: 0
   max_epochs: 1500
   limit_train_batches: 100

@@ -2,7 +2,7 @@ job_name: sa_edge_clr-${uuid:}
 seed_everything: 72
 slurm:
   nodes: 1
-  timeout: 8
+  timeout: 15
   # TODO: add new keys to other files
   partition: general
   constraint: ""
@@ -38,6 +38,7 @@ model:
       attn_inner_dim: 64
       heads: 1
       graph_conv: True
+      resizing: interpolate
   vicreg_opts:
     use_vicreg: False
   moco_opts:
