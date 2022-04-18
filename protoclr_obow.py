@@ -762,6 +762,7 @@ class PCLROBoW(pl.LightningModule):
                     None,
                     mode="no_adapt"
                 )
+                output = classifier(output)
                 loss = loss_fn(output, y_batch)
 
                 #####################################
