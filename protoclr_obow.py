@@ -278,7 +278,7 @@ class PCLROBoW(pl.LightningModule):
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
         _, z = self.mpnn_shared_step(torch.cat([x_support, x_query]), torch.cat([y_support, y_query], 1).squeeze())
-        loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query, ways, loss_fn=self.gnn_loss)
+        loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query, ways)
         return loss, acc, z[0]
 
     @torch.no_grad()
@@ -403,6 +403,8 @@ class PCLROBoW(pl.LightningModule):
             opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
         elif self.optim == 'adam':
             opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+        elif self.optim == 'radam':
+            opt = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
         if self.lr_sch == 'cos':
             sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
@@ -417,6 +419,8 @@ class PCLROBoW(pl.LightningModule):
         elif self.lr_sch == 'step':
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
             ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        else:
+            ret = {'optimizer': opt}
         return ret
 
     def forward(self, x, x_prime, labels=None):
