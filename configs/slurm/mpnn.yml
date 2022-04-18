@@ -89,7 +89,6 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
-  accumulate_grad_batches: 2
   num_sanity_val_steps: 2
   fast_dev_run: False
   max_epochs: 2500
