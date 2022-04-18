@@ -1,4 +1,4 @@
-job_name: sa_edge_clr-${uuid:}
+job_name: mpnn_clr-${uuid:}
 seed_everything: 72
 slurm:
   nodes: 1
