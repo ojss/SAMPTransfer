@@ -653,7 +653,8 @@ class PCLROBoW(pl.LightningModule):
             encoder.train()
         elif self.mpnn_opts["_use"]:
             self.eval()
-            self.mpnn_shared_step(x_a_i, y_a_i)
+            _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
+            z_a_i = z_a_i[0]
             self.train()
         else:
             encoder.eval()
@@ -703,6 +704,7 @@ class PCLROBoW(pl.LightningModule):
                 #####################################
                 if self.mpnn_opts["_use"]:
                     _, output = self.mpnn_shared_step(z_batch, y_batch)
+                    output = output[0]
                 else:
                     output = self._shared_gcn_step(
                         encoder,
@@ -723,14 +725,18 @@ class PCLROBoW(pl.LightningModule):
                 if freeze_backbone is False:
                     delta_opt.step()
         classifier.eval()
-        encoder.eval()
-        fusion.eval()
-        ec.eval()
-
-        output = self._shared_gcn_step(encoder, fusion, ec, x_b_i, None, mode="no_adapt")
-        scores = classifier(output)
+        self.eval()
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
+
+        if self.mpnn_opts["_use"]:
+            _, output = self.mpnn_shared_step(x_b_i, y_query)
+            output = output[0]
+        elif self.graph_conv:
+            output = self._shared_gcn_step(encoder, fusion, ec, x_b_i, None, mode="no_adapt")
+
+        scores = classifier(output)
+
         loss = F.cross_entropy(scores, y_query, reduction='mean')
         _, predictions = torch.max(scores, dim=1)
         # acc = torch.mean(predictions.eq(y_query).float())
