@@ -121,7 +121,7 @@ class GNNReID(nn.Module):
         feats, _, _ = self.gnn_model(feats, edge_index, edge_attr)
 
         if self.params['cat']:
-            feats = [torch.cat(feats, dim=1).to(self.dev)]
+            feats = [torch.cat(feats, dim=1)]
         elif self.params['every']:
             feats = feats
         else:
