@@ -59,6 +59,7 @@ class MyCLI(LightningCLI):
         # parser.add_argument(
         #     "slurm.ngpus", default=1, type=int, help="Number of gpus to request on each node"
         # )
+        parser.add_argument("--slurm.mem_gb", default=16, type=int)
         parser.add_argument(
             "--slurm.timeout", default=72, type=int, help="Duration of the job, in hours"
         )
