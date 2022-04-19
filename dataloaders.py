@@ -396,6 +396,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                              batch_size=1,
                                              split='test',
                                              shuffle=False,
+                                             num_workers=2,
                                              **self.kwargs)
         return dataloader_test
 

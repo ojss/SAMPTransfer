@@ -913,10 +913,10 @@ def slurm_main(conf_path, UUID):
                 save_config_filename=str(UUID),
                 parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
     cli.trainer.fit(cli.model, cli.datamodule)
-    cli.trainer.test(datamodule=cli.datamodule)
+    cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.last_model_path, datamodule=cli.datamodule)
     # deleting tmp config file:
-    if os.path.isfile(conf_path):
-        os.remove(conf_path)
+    # if os.path.isfile(conf_path):
+    #     os.remove(conf_path)
 
 
 if __name__ == "__main__":
