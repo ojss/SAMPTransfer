@@ -35,7 +35,7 @@ model:
   mpnn_opts:
     _use: True
     task_adapt: True
-    temperature: 0.6
+    temperature: 0.2
     output_train_gnn: plain
     graph_params:
       sim_type: "correlation"

@@ -423,6 +423,11 @@ class PCLROBoW(pl.LightningModule):
         elif self.lr_sch == 'step':
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
             ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        elif self.lr_sch == "one_cycle":
+            sch = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=self.lr,
+                                                      steps_per_epoch=self.trainer.limit_train_batches,
+                                                      epochs=self.trainer.max_epochs)
+            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
         else:
             ret = {'optimizer': opt}
         return ret
