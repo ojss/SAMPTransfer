@@ -115,6 +115,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_clr: bool,
                  clr_on_bow: bool,
                  graph_conv_opts: dict,
+                 mpnn_loss_fn: nn.Module,
                  mpnn_opts: dict,
                  vicreg_opts: dict,
                  img_orig_size: Iterable,
@@ -255,7 +256,8 @@ class PCLROBoW(pl.LightningModule):
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
             self.gnn = GNNReID(self.device, mpnn_opts["gnn_params"], in_dim).to(self.device)
             self.graph_generator = GraphGenerator(self.device, **mpnn_opts["graph_params"])
-            self.gnn_loss = CrossEntropyLabelSmooth(self.batch_size, dev=0)
+            self.mpnn_temperature = mpnn_opts["temperature"]
+            self.gnn_loss = mpnn_loss_fn
 
         self.vicreg = vicreg_opts
         self.automatic_optimization = True
@@ -278,7 +280,9 @@ class PCLROBoW(pl.LightningModule):
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
         _, z = self.mpnn_shared_step(torch.cat([x_support, x_query]), torch.cat([y_support, y_query], 1).squeeze())
-        loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query, ways)
+        loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query,
+                                                 ways, loss_fn=self.gnn_loss,
+                                                 temperature=self.mpnn_temperature)
         return loss, acc, z[0]
 
     @torch.no_grad()
@@ -520,7 +524,7 @@ class PCLROBoW(pl.LightningModule):
         loss, acc = prototypical_loss(z_proto, z_query_bow, y_query, distance=self.distance)
         return loss, acc
 
-    def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy):
+    def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
         #
         # e.g. [1,50*n_support,*(3,84,84)]
@@ -534,7 +538,7 @@ class PCLROBoW(pl.LightningModule):
             z_proto = get_prototypes(z_support, y_support, ways)
 
         loss, acc = prototypical_loss(z_proto, z_query, y_query,
-                                      distance=self.distance, loss_fn=loss_fn)
+                                      distance=self.distance, loss_fn=loss_fn, temperature=temperature)
         return loss, acc
 
     def training_step(self, batch, batch_idx):
@@ -624,6 +628,7 @@ class PCLROBoW(pl.LightningModule):
 
         y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(
             self.device)  # (25,)
+        y_b_i = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
         x_b_i = x_query_var
         x_a_i = x_support_var
@@ -657,8 +662,13 @@ class PCLROBoW(pl.LightningModule):
             encoder.train()
         elif self.mpnn_opts["_use"]:
             self.eval()
-            _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
-            z_a_i = z_a_i[0]
+            if self.mpnn_opts["task_adapt"]:
+                _, z = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_b_i]))
+                z = z[0]
+                z_a_i = z[:support_size, :]
+            else:
+                _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
+                z_a_i = z_a_i[0]
             self.train()
         else:
             encoder.eval()

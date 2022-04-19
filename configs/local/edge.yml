@@ -28,8 +28,14 @@ model:
       heads: 1
       graph_conv: False
       resizing: interpolate
+  mpnn_loss_fn:
+    class_path: losses.CrossEntropyLabelSmooth
+    init_args:
+      num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
+    task_adapt: True
+    temperature: 0.6
     output_train_gnn: plain
     graph_params:
       sim_type: "correlation"
@@ -41,9 +47,9 @@ model:
       cat: 0
       every: 0
       gnn:
-        num_layers: 1
+        num_layers: 2
         aggregator: "add"
-        num_heads: 2
+        num_heads: 8
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -78,9 +84,9 @@ model:
       graph_conv: False
 trainer:
   gpus: -1
-#  gradient_clip_val: 0.5
-  num_sanity_val_steps: 0
-  fast_dev_run: 0
+  #  gradient_clip_val: 0.5
+  num_sanity_val_steps: 1
+  fast_dev_run: 1
   max_epochs: 1500
   limit_train_batches: 100
   limit_val_batches: 15

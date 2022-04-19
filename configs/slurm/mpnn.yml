@@ -39,8 +39,14 @@ model:
       heads: 1
       graph_conv: False
       resizing: interpolate
+  mpnn_loss_fn:
+    class_path: losses.CrossEntropyLabelSmooth
+    init_args:
+      num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
+    task_adapt: False
+    temperature: 0.6
     output_train_gnn: plain
     graph_params:
       sim_type: "correlation"
@@ -92,7 +98,7 @@ trainer:
   num_sanity_val_steps: 2
   fast_dev_run: False
   max_epochs: 2500
-  min_epochs: 300
+  min_epochs: 700
   limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
@@ -103,11 +109,15 @@ trainer:
       save_dir: wandb_logs
       log_model: True
   callbacks:
+    - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
+      init_args:
+        max_depth: 3
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: ./ckpts/${job_name}
+        filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
         monitor: "train_accuracy_epoch"
-        save_top_k: 10
+        save_top_k: 3
         every_n_epochs: 1
         mode: "max"
     - class_path: pytorch_lightning.callbacks.EarlyStopping
