@@ -2,6 +2,7 @@ job_name: mpnn_clr-${uuid:}
 seed_everything: 72
 slurm:
   nodes: 1
+  mem_gb: 20
   timeout: 15
   # TODO: add new keys to other files
   partition: general

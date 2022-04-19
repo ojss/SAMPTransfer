@@ -40,7 +40,7 @@ def main():
     executor.update_parameters(
         name=cfg["job_name"],
         # gpus_per_node=args["ngpus"],
-        mem_gb=12 * ngpus,
+        mem_gb=args["mem_gb"] * ngpus,
         tasks_per_node=ngpus,
         cpus_per_task=8,
         nodes=args["nodes"],
