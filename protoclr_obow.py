@@ -284,7 +284,9 @@ class PCLROBoW(pl.LightningModule):
         _, z_orig, z = self.mpnn_shared_step(torch.cat([x_support, x_query]),
                                              torch.cat([y_support, y_query], 1).squeeze())
         if self.mpnn_opts["loss_cnn"]:
-            loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways)
+            loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways,
+                                                       temperature=self.mpnn_temperature)
+            loss_cnn *= self.mpnn_opts["scaling_ce"]
             self.log("loss_cnn", loss_cnn.item())
         loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query,
                                                  ways, loss_fn=self.gnn_loss,
