@@ -2,7 +2,7 @@ __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
 import os.path
-from typing import Optional, Iterable
+from typing import Optional, Iterable, Union
 
 import math
 import numpy as np
@@ -115,7 +115,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_clr: bool,
                  clr_on_bow: bool,
                  graph_conv_opts: dict,
-                 mpnn_loss_fn: nn.Module,
+                 mpnn_loss_fn: Union[Optional[nn.Module], Optional[str]],
                  mpnn_opts: dict,
                  vicreg_opts: dict,
                  img_orig_size: Iterable,
@@ -257,7 +257,10 @@ class PCLROBoW(pl.LightningModule):
             self.gnn = GNNReID(self.device, mpnn_opts["gnn_params"], in_dim).to(self.device)
             self.graph_generator = GraphGenerator(self.device, **mpnn_opts["graph_params"])
             self.mpnn_temperature = mpnn_opts["temperature"]
-            self.gnn_loss = mpnn_loss_fn
+            if isinstance(mpnn_loss_fn, nn.Module):
+                self.gnn_loss = mpnn_loss_fn
+            elif mpnn_loss_fn == "ce":
+                self.gnn_loss = F.cross_entropy
 
         self.vicreg = vicreg_opts
         self.automatic_optimization = True

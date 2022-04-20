@@ -28,10 +28,10 @@ model:
       heads: 1
       graph_conv: False
       resizing: interpolate
-  mpnn_loss_fn:
-    class_path: losses.CrossEntropyLabelSmooth
-    init_args:
-      num_classes: ${data.batch_size}
+  mpnn_loss_fn: "ce"
+#    class_path: losses.CrossEntropyLabelSmooth
+#    init_args:
+#      num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
     loss_cnn: True
