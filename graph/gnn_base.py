@@ -5,6 +5,7 @@ from torch_scatter import scatter_mean
 
 from .attentions import MultiHeadDotProduct
 from .utils import *
+from .equilibirium import SuperMLP
 
 logger = logging.getLogger('GNNReID.GNNModule')
 
@@ -106,6 +107,10 @@ class GNNReID(nn.Module):
             self.aggr = lambda out, row, dim, x_size: scatter_max(out, row,
                                                                   dim=dim,
                                                                   dim_size=x_size)
+        # TODO figure out code for equilibrium pooling
+        # if self.gnn_params['aggregator'] == 'equilibrium':
+        #     self.aggr = SuperMLP(emb_dim=embed_dim, hidden=[embed_dim, embed_dim, 32], activation=nn.Tanh(),
+        #                          activation_final=False, residual=True, normalise=True)
 
         gnn = GNNNetwork(embed_dim, self.aggr, self.dev,
                          self.gnn_params, self.gnn_params['num_layers'])
