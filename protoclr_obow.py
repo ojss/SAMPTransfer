@@ -270,19 +270,25 @@ class PCLROBoW(pl.LightningModule):
 
     def mpnn_shared_step(self, x, y):
         z = self.feature_extractor(x)
+        z_orig = z.clone().flatten(1)
         z = z.flatten(1)
         edge_attr, edge_index, z = self.graph_generator.get_graph(z, y)
         edge_index = edge_index.to(self.device)
         edge_attr = edge_attr.to(self.device)
         preds, z = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
 
-        return preds, z
+        return preds, z_orig, z
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
-        _, z = self.mpnn_shared_step(torch.cat([x_support, x_query]), torch.cat([y_support, y_query], 1).squeeze())
+        loss_cnn = 0.
+        _, z_orig, z = self.mpnn_shared_step(torch.cat([x_support, x_query]),
+                                             torch.cat([y_support, y_query], 1).squeeze())
+        if self.mpnn_opts["loss_cnn"]:
+            loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways)
         loss, acc = self.calculate_protoclr_loss(z[0], y_support, y_query,
                                                  ways, loss_fn=self.gnn_loss,
                                                  temperature=self.mpnn_temperature)
+        loss = loss + loss_cnn
         return loss, acc, z[0]
 
     @torch.no_grad()
@@ -668,11 +674,11 @@ class PCLROBoW(pl.LightningModule):
         elif self.mpnn_opts["_use"]:
             self.eval()
             if self.mpnn_opts["task_adapt"]:
-                _, z = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_b_i]))
+                _, _, z = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_b_i]))
                 z = z[0]
                 z_a_i = z[:support_size, :]
             else:
-                _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
+                _, _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
                 z_a_i = z_a_i[0]
             self.train()
         else:
@@ -722,7 +728,7 @@ class PCLROBoW(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
                 #####################################
                 if self.mpnn_opts["_use"]:
-                    _, output = self.mpnn_shared_step(z_batch, y_batch)
+                    _, _, output = self.mpnn_shared_step(z_batch, y_batch)
                     output = output[0]
                 else:
                     output = self._shared_gcn_step(
@@ -749,8 +755,12 @@ class PCLROBoW(pl.LightningModule):
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
         if self.mpnn_opts["_use"]:
-            _, output = self.mpnn_shared_step(x_b_i, y_query)
-            output = output[0]
+            if self.mpnn_opts["task_adapt"]:
+                _, _, output = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_query]))
+                output = output[0][support_size:, :]
+            else:
+                _, _, output = self.mpnn_shared_step(x_b_i, y_query)
+                output = output[0]
         elif self.graph_conv:
             output = self._shared_gcn_step(encoder, fusion, ec, x_b_i, None, mode="no_adapt")
 

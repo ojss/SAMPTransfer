@@ -46,6 +46,7 @@ model:
       num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
+    loss_cnn: True
     task_adapt: False
     temperature: 0.2
     output_train_gnn: plain

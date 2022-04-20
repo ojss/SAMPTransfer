@@ -34,7 +34,8 @@ model:
       num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
-    task_adapt: True
+    loss_cnn: True
+    task_adapt: False
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -91,6 +92,13 @@ trainer:
   limit_train_batches: 100
   limit_val_batches: 15
   #  logger:
+  #    class_path: pytorch_lightning.loggers.CometLogger
+  #    init_args:
+  #      save_dir: "./comet"
+  #      api_key: ${oc.env:COMET_API_KEY}
+  #      rest_api_key: ${oc.env:COMET_API_KEY}
+  #      project_name: testing
+  #      experiment_name: ${job_name}
   #    class_path: pytorch_lightning.loggers.WandbLogger
   #    init_args:
   #      project: testing
