@@ -144,6 +144,7 @@ data:
   n_query: 3
   batch_size: 64
   num_workers: 6
+  tfm_method: vicreg
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

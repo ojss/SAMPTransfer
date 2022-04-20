@@ -9,23 +9,20 @@ import json
 import os
 from collections import OrderedDict
 
-# Cell
-# export
 import h5py
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from PIL import Image
+from PIL import Image, ImageFilter, ImageOps
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
-from torchvision.datasets import ImageFolder
 from torch.utils.data.dataloader import default_collate
 from torchmeta.datasets.helpers import (omniglot, miniimagenet, tieredimagenet,
                                         cub, cifar_fs, doublemnist, triplemnist)
 from torchmeta.utils.data import BatchMetaDataLoader, MetaDataLoader
 from torchvision import transforms
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import InterpolationMode
 
-
-# Cell
 
 def collate_task(task):
     if isinstance(task, Dataset):
@@ -142,9 +139,10 @@ class ULDS(ImageFolder):
 
 # Cell
 class UnlabelledDataset(Dataset):
-    def __init__(self, dataset, datapath, split, transform=None,
+    def __init__(self, dataset, datapath, split, transform=None, tfm_method=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None,
-                 seed=10, no_aug_support=False, no_aug_query=False, img_size_orig=(224, 224), img_size_crop=(84, 84)):
+                 seed=10, no_aug_support=False, no_aug_query=False,
+                 img_size_orig=(224, 224), img_size_crop=(84, 84)):
         """
         Args:
             dataset (string): Dataset name.
@@ -181,6 +179,9 @@ class UnlabelledDataset(Dataset):
         if transform is not None:
             self.transform = transform
         else:
+            if tfm_method is not None:
+                self.transform = get_transforms(tfm_method, self.img_size_crop)
+                self.original_transform = identity_transform(self.img_size_orig)
             if self.dataset == 'cub':
                 self.transform = transforms.Compose([
                     get_cub_default_transform(self.img_size_crop),
@@ -299,6 +300,62 @@ def get_custom_transform(img_shape):
     return data_transforms
 
 
+class GaussianBlur(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, img):
+        if np.random.rand() < self.p:
+            sigma = np.random.rand() * 1.9 + 0.1
+            return img.filter(ImageFilter.GaussianBlur(sigma))
+        else:
+            return img
+
+
+class Solarization(object):
+    def __init__(self, p):
+        self.p = p
+
+    def __call__(self, img):
+        if np.random.rand() < self.p:
+            return ImageOps.solarize(img)
+        else:
+            return img
+
+
+def get_transforms(method, img_size):
+    if method == "vicreg":
+        return vicreg_transforms(img_size)
+
+
+def vicreg_transforms(img_size):
+    tfms = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(
+                size=img_size[-2:], scale=(0.5, 1.0), interpolation=InterpolationMode.BICUBIC
+            ),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply(
+                [
+                    transforms.ColorJitter(
+                        brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1
+                    )
+                ],
+                p=0.8,
+            ),
+            transforms.RandomGrayscale(p=0.2),
+            GaussianBlur(p=0.1),
+            Solarization(p=0.2),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+
+    return tfms
+
+
 def identity_transform(img_shape):
     return transforms.Compose([transforms.Resize(img_shape),
                                transforms.ToTensor()])
@@ -307,7 +364,7 @@ def identity_transform(img_shape):
 # Cell
 
 class UnlabelledDataModule(pl.LightningDataModule):
-    def __init__(self, dataset, datapath, split, transform=None, full_size_path=None,
+    def __init__(self, dataset, datapath, split, transform=None, tfm_method=None, full_size_path=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None, batch_size=50, num_workers=8,
                  seed=10, no_aug_support=False, no_aug_query=False, merge_train_val=True, mode='val',
                  eval_ways=5, eval_support_shots=5, eval_query_shots=15, img_size_orig=(224, 224),
@@ -322,6 +379,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
         self.img_size = (28, 28) if dataset == 'omniglot' else img_size_crop
         self.no_aug_support = no_aug_support
         self.no_aug_query = no_aug_query
+        self.tfm_method = tfm_method
 
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -352,6 +410,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
             self.dataset_train = UnlabelledDataset(self.dataset,
                                                    self.datapath, split='train',
                                                    transform=None,
+                                                   tfm_method=self.tfm_method,
                                                    n_images=self.n_images,
                                                    n_classes=self.n_classes,
                                                    n_support=self.n_support,
@@ -362,6 +421,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
             if self.merge_train_val:
                 dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
                                                 transform=None,
+                                                tfm_method=self.tfm_method,
                                                 n_support=self.n_support,
                                                 n_query=self.n_query,
                                                 no_aug_support=self.no_aug_support,

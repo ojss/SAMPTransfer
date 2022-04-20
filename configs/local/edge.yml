@@ -29,9 +29,9 @@ model:
       graph_conv: False
       resizing: interpolate
   mpnn_loss_fn: "ce"
-#    class_path: losses.CrossEntropyLabelSmooth
-#    init_args:
-#      num_classes: ${data.batch_size}
+  #    class_path: losses.CrossEntropyLabelSmooth
+  #    init_args:
+  #      num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
     loss_cnn: True
@@ -139,6 +139,7 @@ data:
   n_query: 3
   batch_size: 64
   num_workers: 0
+  tfm_method: vicreg
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True
