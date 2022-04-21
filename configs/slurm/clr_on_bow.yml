@@ -1,13 +1,18 @@
 job_name: clr_on_bow-${uuid:}
+seed_everything: 72
 slurm:
   nodes: 1
   timeout: 8
+  mem_gb: 10
+  partition: general
+  constraint: ""
+  comment: ""
   slurm_additional_parameters:
     qos: medium
     gres: gpu:a40:1
     signal: SIGUSR1@90
 model:
-  optim: "adam"
+  optim: "radam"
   lr_sch: "step"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
@@ -26,6 +31,54 @@ model:
     use_moco: False
   graph_conv_opts:
     use_graph_conv: False
+    k: 5
+    aggregation: mean
+    mlp: False
+    task_adapt: False
+    m_scale:
+      use_m_scale: False
+      m_scale_projector_dim: 512
+      attn_pooling: False
+      attn_inner_dim: 64
+      heads: 1
+      graph_conv: False
+      resizing: interpolate
+  mpnn_loss_fn:
+  mpnn_opts:
+    _use: False
+    loss_cnn: False
+    scaling_ce: 1
+    task_adapt: False
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 2
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10
@@ -45,16 +98,23 @@ trainer:
   num_sanity_val_steps: 0
   fast_dev_run: False
   max_epochs: 2000
-  min_epochs: 250
+  min_epochs: 700
   limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
-    class_path: pytorch_lightning.loggers.WandbLogger
+    class_path: pytorch_lightning.loggers.CometLogger
     init_args:
-      project: PCLR-OboW
-      save_dir: wandb_logs
-      log_model: True
+      save_dir: "./comet"
+      api_key: ${oc.env:COMET_API_KEY}
+      rest_api_key: ${oc.env:COMET_API_KEY}
+      project_name: CLR_on_BoW
+      experiment_name: ${job_name}
+#    class_path: pytorch_lightning.loggers.WandbLogger
+#    init_args:
+#      project: PCLR-OboW
+#      save_dir: wandb_logs
+#      log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
@@ -83,6 +143,7 @@ data:
   n_query: 3
   batch_size: 64
   num_workers: 6
+  tfm_method: vicreg
   img_size_orig: [ 224, 224 ]
   img_size_crop: [ 224, 224 ]
   no_aug_support: True

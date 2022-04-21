@@ -115,7 +115,7 @@ class PCLROBoW(pl.LightningModule):
                  bow_clr: bool,
                  clr_on_bow: bool,
                  graph_conv_opts: dict,
-                 mpnn_loss_fn: Union[Optional[nn.Module], Optional[str]],
+                 mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  vicreg_opts: dict,
                  img_orig_size: Iterable,
@@ -736,7 +736,7 @@ class PCLROBoW(pl.LightningModule):
                 if self.mpnn_opts["_use"]:
                     _, _, output = self.mpnn_shared_step(z_batch, y_batch)
                     output = output[0]
-                else:
+                elif self.graph_conv:
                     output = self._shared_gcn_step(
                         encoder,
                         fusion,
@@ -745,6 +745,9 @@ class PCLROBoW(pl.LightningModule):
                         None,
                         mode="no_adapt"
                     )
+                else:
+                    output = encoder(z_batch).flatten(1)
+
                 output = classifier(output)
                 loss = loss_fn(output, y_batch)
 
