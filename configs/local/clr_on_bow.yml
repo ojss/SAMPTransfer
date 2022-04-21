@@ -1,29 +1,82 @@
 job_name: local_test
+seed_everything: 72
+slurm:
+  nodes: 1
+  timeout: 8
+  mem_gb: 10
+  partition: general
+  constraint: ""
+  comment: ""
+  slurm_additional_parameters:
+    qos: medium
+    gres: gpu:a40:1
+    signal: SIGUSR1@90
 model:
-  optim: "adam"
+  optim: "radam"
   lr_sch: "step"
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  eta_min: 5e-5
+  eta_min: 1e-5
   lr: 1e-3
-  lr_decay_step: 25000
-  lr_decay_rate: 0.5
+  lr_decay_step: 25000 # applies only for Step LR
+  lr_decay_rate: 0.5 # applies only for Step LR
   weight_decay: 0.0001
-  alpha_cosine: False # TODO: check with True + Moco loss as well
+  alpha_cosine: False # Doesn't really matter here
   bow_clr: False
   clr_loss: False
   clr_on_bow: True
   vicreg_opts:
     use_vicreg: False
-  moco_opts:
-    use_moco: False
-    dim: 128
-    K: 65536
-    m: 0.999
-    T: 0.07
-    mlp: False
   graph_conv_opts:
     use_graph_conv: False
+    k: 5
+    aggregation: mean
+    mlp: False
+    task_adapt: False
+    m_scale:
+      use_m_scale: False
+      m_scale_projector_dim: 512
+      attn_pooling: False
+      attn_inner_dim: 64
+      heads: 1
+      graph_conv: False
+      resizing: interpolate
+  mpnn_loss_fn: ce
+  mpnn_opts:
+    _use: False
+    loss_cnn: False
+    scaling_ce: 1
+    task_adapt: False
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 2
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
   bow_levels: [ "block4" ]
   bow_extractor_opts:
     inv_delta: 10
@@ -37,11 +90,12 @@ model:
       in_channels: 3
       hidden_size: 64
       out_channels: 64
-      last_maxpool: False
+      last_maxpool: True
+      global_pooling: False
 trainer:
   gpus: -1
-  num_sanity_val_steps: 0
-  fast_dev_run: 1
+  num_sanity_val_steps: 1
+  fast_dev_run: 0
   max_epochs: 1500
   limit_train_batches: 100
   limit_val_batches: 15

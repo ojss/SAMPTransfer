@@ -27,8 +27,6 @@ model:
   clr_on_bow: True
   vicreg_opts:
     use_vicreg: False
-  moco_opts:
-    use_moco: False
   graph_conv_opts:
     use_graph_conv: False
     k: 5
@@ -43,7 +41,7 @@ model:
       heads: 1
       graph_conv: False
       resizing: interpolate
-  mpnn_loss_fn:
+  mpnn_loss_fn: ce
   mpnn_opts:
     _use: False
     loss_cnn: False

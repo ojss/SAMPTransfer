@@ -689,7 +689,7 @@ class PCLROBoW(pl.LightningModule):
             self.train()
         else:
             encoder.eval()
-            z_a_i = encoder(x_a_i).flatten()
+            z_a_i = encoder(x_a_i).flatten(1)
             encoder.train()
 
         # Define linear classifier
@@ -711,6 +711,7 @@ class PCLROBoW(pl.LightningModule):
         if freeze_backbone is False:
             encoder.train()
         else:
+            encoder.eval()
             self.eval()
         classifier.train()
         if not finetune_batch_norm:
@@ -772,6 +773,8 @@ class PCLROBoW(pl.LightningModule):
                 output = output[0]
         elif self.graph_conv:
             output = self._shared_gcn_step(encoder, fusion, ec, x_b_i, None, mode="no_adapt")
+        else:
+            output = encoder(x_b_i).flatten(1)
 
         scores = classifier(output)
 
