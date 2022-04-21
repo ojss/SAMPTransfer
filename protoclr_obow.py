@@ -539,7 +539,7 @@ class PCLROBoW(pl.LightningModule):
         else:
             z_proto = get_prototypes(z_supp_bow, y_support, ways)
         loss, acc = prototypical_loss(z_proto, z_query_bow, y_query, distance=self.distance)
-        return loss, acc
+        return loss, acc, bow_repr[0]
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
@@ -597,7 +597,7 @@ class PCLROBoW(pl.LightningModule):
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
         if self.clr_on_bow:
-            loss, acc = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
+            loss, acc, z = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
         elif self.mpnn_opts["_use"]:
             loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
         elif self.graph_conv:
