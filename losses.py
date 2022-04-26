@@ -226,3 +226,16 @@ class TripletLoss(nn.Module):
         loss = self.ranking_loss(dist_an, dist_ap, y)
         prec = (dist_an.data > dist_ap.data).sum() * 1. / y.size(0)
         return loss, prec
+
+
+class HLoss(nn.Module):
+    def __init__(self, temperature_t: float, temperature_s: float):
+        super(HLoss, self).__init__()
+        self.temperature_t = temperature_t
+        self.temperature_s = temperature_s
+
+    def __call__(self, t: torch.Tensor, s: torch.Tensor, center: torch.Tensor) -> torch.Tensor:
+        t = F.softmax((t.detach() - center) / self.temperature_t, dim=1)
+        log_s = F.log_softmax(s / self.temperature_s, dim=1)
+
+        return -(t * log_s).sum(dim=-1).mean()

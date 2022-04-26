@@ -18,41 +18,38 @@ def get_train_images(ds, num):
 
 
 class EmbeddingLogger(pl.Callback):
-    def __init__(self, every_n_steps=10):
+    def __init__(self, every_n_steps=10, topk=10):
         super(EmbeddingLogger, self).__init__()
         self.every_n_steps = every_n_steps
+        self.topk = 10
 
-    def on_train_batch_end(
+    def on_validation_batch_end(
             self,
             trainer: "pl.Trainer",
-            pl_module: PCLROBoW,
-            outputs,
+            pl_module: "pl.LightningModule",
+            outputs: Optional,
             batch: Any,
             batch_idx: int,
-            unused: Optional[int] = 0,
+            dataloader_idx: int,
     ) -> None:
         if trainer.global_step % self.every_n_steps == 0:
-            pl_module.eval()
-            z = copy.deepcopy(outputs["embeddings"])
-            ways = pl_module.batch_size
-            y_query = torch.arange(ways).unsqueeze(
-                0).unsqueeze(2)  # batch and shot dim
-            y_query = y_query.repeat(1, 1, pl_module.n_query)
-            y_query = y_query.view(1, -1).to(pl_module.device)
+            valid_embeds = pl_module.teacher(batch["test"][0][0])
+            valid_embeds = [pred for pred in valid_embeds]
+            columns = ["image"] + [f"closest_{i + 1}" for i in range(self.topk)]
+            indices = np.random.choice(len(self.valid_files), VALID_IMAGES, replace=False)
 
-            y_support = torch.arange(ways).unsqueeze(
-                0).unsqueeze(2)  # batch and shot dim
-            y_support = y_support.repeat(1, 1, pl_module.n_support)
-            y_support = y_support.view(1, -1).to(pl_module.device)
-            labels = torch.cat([y_support, y_query], dim=-1)
-            z = torch.cat([z, labels.T], dim=-1)
-            wandb.log({
-                "embeddings": wandb.Table(
-                    columns=[f"D{c}" for c in range(z.shape[-1])],
-                    data=z.cpu().tolist()
-                )
-            })
-            pl_module.train()
+
+class GradLogger(pl.Callback):
+    def __init__(self, every_n_steps=10):
+        self.every_n_steps = every_n_steps
+
+    def on_after_backward(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"):
+        if trainer.global_step % self.every_n_steps == 0:
+            for name, param in pl_module.student.named_parameters():
+                if "weight" in name and not "norm" in name and param.requires_grad:
+                    pl_module.logger.experiment.log(
+                        {f"{name}_grad": wandb.Histogram(param.grad.cpu())}
+                    )
 
 
 class WandbImageCallback(pl.Callback):

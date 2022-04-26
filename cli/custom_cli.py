@@ -3,9 +3,39 @@ from typing import Optional, Type, Union, Callable, Dict, Any
 import pytorch_lightning as pl
 from jsonargparse import lazy_instance
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer
-from pytorch_lightning.utilities.cli import LightningCLI, SaveConfigCallback
+from pytorch_lightning.utilities.cli import LightningCLI, SaveConfigCallback, LightningArgumentParser
 
 from bow.feature_extractor import CNN_4Layer
+
+
+def add_slurm_args(parser: LightningArgumentParser):
+    parser.add_argument("--job_name", default="local_dev_run", type=str, help="Job name")
+    parser.add_argument(
+        "--slurm.nodes", default=1, type=int, help="Number of nodes to request"
+    )
+    # parser.add_argument(
+    #     "slurm.ngpus", default=1, type=int, help="Number of gpus to request on each node"
+    # )
+    parser.add_argument("--slurm.mem_gb", default=16, type=int)
+    parser.add_argument(
+        "--slurm.timeout", default=72, type=int, help="Duration of the job, in hours"
+    )
+    parser.add_argument(
+        "--slurm.partition", default="general", type=str, help="Partition where to submit"
+    )
+    parser.add_argument("--slurm.slurm_additional_parameters", type=dict)
+    parser.add_argument(
+        "--slurm.constraint",
+        default="",
+        type=str,
+        help="Slurm constraint. Use 'volta32gb' for Tesla V100 with 32GB",
+    )
+    parser.add_argument(
+        "--slurm.comment",
+        default="",
+        type=str,
+        help="Comment to pass to scheduler, e.g. priority message")
+    return parser
 
 
 class MyCLI(LightningCLI):
@@ -46,35 +76,15 @@ class MyCLI(LightningCLI):
         parser.link_arguments("data.n_query", "model.n_query")
         parser.link_arguments("data.img_size_orig", "model.img_orig_size")
 
-        parser.add_argument("--bow_extractor_opts.inv_delta", default=15)
-        parser.add_argument("--bow_extractor_opts.num_words", default=8192)
+        parser.add_argument("bow_extractor_opts.inv_delta", default=15)
+        parser.add_argument("bow_extractor_opts.num_words", default=8192)
 
-        parser.add_argument("--bow_predictor_opts.kappa", default=8)
+        parser.add_argument("bow_predictor_opts.kappa", default=8)
         parser.add_argument("--graph_conv_opts.m_scale.resizing", default='avg')
 
-        parser.add_argument("--job_name", default="local_dev_run", type=str, help="Job name")
-        parser.add_argument(
-            "--slurm.nodes", default=1, type=int, help="Number of nodes to request"
-        )
-        # parser.add_argument(
-        #     "slurm.ngpus", default=1, type=int, help="Number of gpus to request on each node"
-        # )
-        parser.add_argument("--slurm.mem_gb", default=16, type=int)
-        parser.add_argument(
-            "--slurm.timeout", default=72, type=int, help="Duration of the job, in hours"
-        )
-        parser.add_argument(
-            "--slurm.partition", default="general", type=str, help="Partition where to submit"
-        )
-        parser.add_argument("--slurm.slurm_additional_parameters", type=dict)
-        parser.add_argument(
-            "--slurm.constraint",
-            default="",
-            type=str,
-            help="Slurm constraint. Use 'volta32gb' for Tesla V100 with 32GB",
-        )
-        parser.add_argument(
-            "--slurm.comment",
-            default="",
-            type=str,
-            help="Comment to pass to scheduler, e.g. priority message")
+        parser = add_slurm_args(parser)
+
+
+class DINOCli(LightningCLI):
+    def add_arguments_to_parser(self, parser: LightningArgumentParser):
+        parser = add_slurm_args(parser)
