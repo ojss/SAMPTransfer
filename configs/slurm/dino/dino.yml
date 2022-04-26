@@ -80,7 +80,7 @@ trainer:
       init_args:
         dirpath: ./ckpts/${job_name}
         monitor: "val_accuracy"
-        save_top_k: 10
+        save_top_k: 2
         every_n_epochs: 1
         mode: "max"
 #    - class_path: pytorch_lightning.callbacks.EarlyStopping
