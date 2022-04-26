@@ -1,3 +1,5 @@
+from typing import Optional
+
 import math
 import torch.nn as nn
 import torchvision.models as models
@@ -243,7 +245,7 @@ class WideResNet(SequentialFeatureExtractorAbstractClass):
 
 
 class ResNet(SequentialFeatureExtractorAbstractClass):
-    def __init__(self, arch, pretrained=False, global_pooling=True):
+    def __init__(self, arch, pretrained=False, global_pooling=True, red: Optional[int] = None):
         net = models.__dict__[arch](num_classes=1000, pretrained=pretrained)
         print(f'==> Pretrained parameters: {pretrained}')
         all_feat_names = []
@@ -270,10 +272,17 @@ class ResNet(SequentialFeatureExtractorAbstractClass):
         # 4th block.
         feature_blocks.append(net.layer4)
         all_feat_names.append('block4')
+
         # global average pooling.
         if global_pooling:
             feature_blocks.append(utils.GlobalPooling(type="avg"))
             all_feat_names.append('GlobalPooling')
+
+        if red is not None:
+            feature_blocks.append(nn.Flatten())
+            all_feat_names.append("final_flatten")
+            feature_blocks.append(nn.Linear(512 * net.layer4[-1].expansion, int(512 * net.layer4[-1].expansion / red)))
+            all_feat_names.append("reduction")
 
         super(ResNet, self).__init__(all_feat_names, feature_blocks)
         self.num_channels = net.fc.in_features

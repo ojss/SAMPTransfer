@@ -34,6 +34,7 @@ model:
   #      num_classes: ${data.batch_size}
   mpnn_opts:
     _use: True
+    gat_version: v1
     loss_cnn: True
     scaling_ce: 1
     task_adapt: False
@@ -77,17 +78,21 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: bow.feature_extractor.CNN_4Layer
+    class_path: bow.feature_extractor.ResNet
     init_args:
-      in_channels: 3
-      hidden_size: 64
-      out_channels: 64
-      global_pooling: False
-      graph_conv: False
+      arch: resnet18
+      global_pooling: True
+      red: 4
+#    class_path: bow.feature_extractor.CNN_4Layer
+#    init_args:
+#      in_channels: 3
+#      hidden_size: 64
+#      out_channels: 64
+#      global_pooling: False
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5
-  num_sanity_val_steps: 1
+  num_sanity_val_steps: 0
   fast_dev_run: 1
   max_epochs: 1500
   limit_train_batches: 100
