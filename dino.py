@@ -282,6 +282,7 @@ class DINO(pl.LightningModule):
             'test_loss': loss.detach(),
             'test_accuracy': acc
         }, prog_bar=True, on_step=True, on_epoch=True)
+        return loss.detach(), acc
 
 
 class Model(nn.Module):
@@ -293,7 +294,7 @@ class Model(nn.Module):
         self.encoder = encoder
         if encoder == "conv4":
             self.backbone = CNN_4Layer(in_channels=3, global_pooling=False)
-        elif encoder in ["vit_tiny", "vit_small", "vit_base"]:
+        elif encoder in vits.__dict__.keys():
             self.backbone = vits.__dict__[encoder](patch_size=16, drop_path_rate=drop_path_rate)
 
             self.backbone = dino_utils.MultiCropWrapper(self.backbone, vits.DINOHead(

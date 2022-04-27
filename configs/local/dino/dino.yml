@@ -25,11 +25,11 @@ model:
       temperature_t: 0.05
   center_momentum: .9
   param_momentum: .995
-  dim: 1024 # for output, configurable for ViT projector, set head=True if needed
+  dim: 768 # for output, configurable for ViT projector, set head=True if needed
   encoder:
-    model: vit_tiny
+    model: vit_micro
     dev: cuda
-    head: True
+    head: False
   gnn_opts:
     use: True
     gat_version: v1
@@ -71,7 +71,7 @@ trainer:
   gpus: -1
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
-  fast_dev_run: 0
+  fast_dev_run: 1
   max_epochs: 100
 #  limit_train_batches: 100
   limit_val_batches: 15
