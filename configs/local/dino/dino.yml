@@ -11,6 +11,7 @@ model:
   ft_freeze_backbone: True
   finetune_batch_norm: False
   finetune_task_adapt: True
+  gnn_opts: ${model.encoder.init_args}
   eval_ways: 5
   loss_fn:
     class_path: losses.HLoss

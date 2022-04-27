@@ -39,6 +39,7 @@ class DINO(pl.LightningModule):
                  ft_freeze_backbone: bool,
                  finetune_batch_norm: bool,
                  finetune_task_adapt: bool,
+                 gnn_opts: dict,
                  eval_ways: int = 5
                  ):
         super(DINO, self).__init__()
@@ -61,6 +62,8 @@ class DINO(pl.LightningModule):
         self.finetune_task_adapt = finetune_task_adapt
         self.eval_ways = eval_ways
 
+        self.gnn_opts = gnn_opts
+
         if isinstance(self.loss_fn, str):
             if self.loss_fn == "hloss":
                 self.loss_fn = HLoss()
@@ -69,7 +72,6 @@ class DINO(pl.LightningModule):
 
         for p in self.teacher.parameters():
             p.requires_grad = False
-
         self.save_hyperparameters()
 
     def configure_optimizers(self):
