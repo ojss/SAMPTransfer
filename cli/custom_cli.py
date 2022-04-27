@@ -87,4 +87,5 @@ class MyCLI(LightningCLI):
 
 class DINOCli(LightningCLI):
     def add_arguments_to_parser(self, parser: LightningArgumentParser):
+        parser.add_argument("--model.lr_sch", type=str, default=None)
         parser = add_slurm_args(parser)

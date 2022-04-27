@@ -1,13 +1,13 @@
 import copy
 import uuid
-from typing import Tuple
+from typing import Tuple, Optional
 
+import deepspeed
 import numpy as np
 import pl_bolts
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-import deepspeed
 import wandb
 from omegaconf import OmegaConf
 from torch import nn
@@ -32,7 +32,7 @@ class DINO(pl.LightningModule):
                  lr: float,
                  min_lr: float,
                  warmup_epochs: int,
-                 lr_sch: str,
+                 lr_sch: Optional[str],
                  lr_decay_step: int,
                  lr_decay_rate: float,
                  loss_fn: nn.Module,
