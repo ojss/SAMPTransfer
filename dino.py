@@ -1,6 +1,6 @@
 import copy
 import uuid
-from typing import Callable, Union, Tuple, Any
+from typing import Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -8,7 +8,6 @@ import torch
 import torch.nn.functional as F
 from deepspeed.ops.adam import FusedAdam
 from omegaconf import OmegaConf
-from pytorch_lightning.utilities.cli import LightningCLI
 from torch import nn
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
@@ -27,6 +26,9 @@ class DINO(pl.LightningModule):
     def __init__(self,
                  encoder: nn.Module,
                  lr: float,
+                 lr_sch: str,
+                 lr_decay_step: int,
+                 lr_decay_rate: float,
                  loss_fn: nn.Module,
                  dim: int,
                  center_momentum: float,
@@ -44,6 +46,9 @@ class DINO(pl.LightningModule):
         self.student = copy.deepcopy(self.teacher)
 
         self.lr = lr
+        self.lr_sch = lr_sch
+        self.lr_decay_step = lr_decay_step
+        self.lr_decay_rate = lr_decay_rate
         self.loss_fn = loss_fn
         self.c_mom = center_momentum
         self.p_mom = param_momentum
@@ -68,7 +73,11 @@ class DINO(pl.LightningModule):
         self.save_hyperparameters()
 
     def configure_optimizers(self):
-        return FusedAdam(self.student.parameters(), lr=self.lr)
+        opt = FusedAdam(self.student.parameters(), lr=self.lr)
+        if self.lr_sch == "step":
+            sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
+            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        return ret
 
     def loss_calculation(self, batch: Tuple[torch.Tensor, torch.Tensor]):
         o, v = batch

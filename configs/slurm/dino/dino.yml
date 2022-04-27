@@ -2,6 +2,9 @@ job_name: local_test
 seed_everything: 72
 model:
   lr: 1e-4
+  lr_sch: step
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
   sup_finetune: True
   sup_finetune_lr: 1e-4
   sup_finetune_epochs: 15
@@ -61,8 +64,9 @@ model:
 
 trainer:
   gpus: -1
-  accumulate_grad_batches: 2
-  num_sanity_val_steps: 2
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 5
+  num_sanity_val_steps: 1
   fast_dev_run: False
   max_epochs: 2500
   min_epochs: 300

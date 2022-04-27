@@ -2,6 +2,9 @@ job_name: local_test
 seed_everything: 72
 model:
   lr: 1e-4
+  lr_sch: step
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
   sup_finetune: True
   sup_finetune_lr: 1e-4
   sup_finetune_epochs: 15
