@@ -1,4 +1,4 @@
-job_name: local_test
+job_name: dino-${uuid:}
 seed_everything: 72
 model:
   lr: 1e-4
