@@ -1,8 +1,10 @@
 job_name: dino-${uuid:}
 seed_everything: 72
 model:
-  lr: 1e-4
-  lr_sch: step
+  lr: 0.0005
+  min_lr: 1e-6
+  warmup_epochs: 30
+  lr_sch: cosine
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   sup_finetune: True
@@ -11,57 +13,59 @@ model:
   ft_freeze_backbone: True
   finetune_batch_norm: False
   finetune_task_adapt: True
-  gnn_opts: ${model.encoder.init_args}
+  use_bn_in_head: False
+  norm_last_layer: False
+  drop_path_rate: 0.1
+  img_orig_size: ${data.img_size_orig}
   eval_ways: 5
   loss_fn:
     class_path: losses.HLoss
     init_args:
       temperature_s: 0.1
       temperature_t: 0.05
-  dim: 1600
   center_momentum: .9
   param_momentum: .995
+  dim: 1024 # for output, configurable for ViT projector, set head=True if needed
   encoder:
-    class_path: dino.Model
-    init_args:
-      dev: cuda
-      img_orig_size: ${data.img_size_orig}
-      gnn: True
-      gnn_opts:
-        gat_version: v1
-        loss_cnn: True
-        scaling_ce: 1
-        task_adapt: False
-        temperature: 0.2
-        output_train_gnn: plain
-        graph_params:
-          sim_type: "correlation"
-          thresh: "no" #0
-          set_negative: "hard"
-        gnn_params:
-          pretrained_path: "no"
-          red: 1
-          cat: 0
-          every: 0
-          gnn:
-            num_layers: 2
-            aggregator: "add"
-            num_heads: 8
-            attention: "dot"
-            mlp: 1
-            dropout_mlp: 0.1
-            norm1: 1
-            norm2: 1
-            res1: 1
-            res2: 1
-            dropout_1: 0.1
-            dropout_2: 0.1
-            mult_attr: 0
-          classifier:
-            neck: 1
-            num_classes: 0
-            dropout_p: 0.4
-            use_batchnorm: 0
+    model: vit_tiny
+    dev: cuda
+    head: True
+  gnn_opts:
+    use: True
+    gat_version: v1
+    loss_cnn: True
+    scaling_ce: 1
+    task_adapt: False
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 8
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
 
 trainer:
   gpus: -1
@@ -69,9 +73,9 @@ trainer:
   check_val_every_n_epoch: 5
   num_sanity_val_steps: 1
   fast_dev_run: False
-  max_epochs: 2500
-  min_epochs: 300
-  limit_train_batches: 100
+  max_epochs: 150
+  #  min_epochs: 300
+  #  limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
@@ -86,22 +90,20 @@ trainer:
         dirpath: ./ckpts/${job_name}
         monitor: "val_accuracy"
         save_top_k: 2
+        save_last: True
         every_n_epochs: 1
         mode: "max"
-#    - class_path: pytorch_lightning.callbacks.EarlyStopping
-#      init_args:
-#        patience: 500
-#        monitor: "train_loss_epoch"
-#        mode: "min"
+    #    - class_path: pytorch_lightning.callbacks.EarlyStopping
+    #      init_args:
+    #        patience: 500
+    #        monitor: "train_loss_epoch"
+    #        mode: "min"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "step"
     - class_path: callbacks.ConfidenceIntervalCallback
       init_args:
         log_to_wb: True
-    - class_path: callbacks.GradLogger
-      init_args:
-        every_n_steps: 50
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
@@ -111,6 +113,6 @@ data:
   batch_size: 64
   num_workers: 0
   tfm_method: vicreg
-  img_size_orig: [ 84, 84 ]
-  img_size_crop: [ 84, 84 ]
+  img_size_orig: [ 224, 224 ]
+  img_size_crop: [ 224, 224 ]
   no_aug_support: True

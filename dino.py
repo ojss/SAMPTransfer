@@ -3,10 +3,12 @@ import uuid
 from typing import Tuple
 
 import numpy as np
+import pl_bolts
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from deepspeed.ops.adam import FusedAdam
+import deepspeed
+import wandb
 from omegaconf import OmegaConf
 from torch import nn
 from torch.autograd import Variable
@@ -14,6 +16,8 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 import graph.graph_generator
+import misc.dino_utils as dino_utils
+import misc.vision_transformer as vits
 from bow.feature_extractor import CNN_4Layer
 from cli.custom_cli import DINOCli
 from dino_dataloader import FewShotDatamodule
@@ -24,12 +28,15 @@ from protoclr_obow import Classifier
 
 class DINO(pl.LightningModule):
     def __init__(self,
-                 encoder: nn.Module,
+                 encoder: dict,
                  lr: float,
+                 min_lr: float,
+                 warmup_epochs: int,
                  lr_sch: str,
                  lr_decay_step: int,
                  lr_decay_rate: float,
                  loss_fn: nn.Module,
+                 img_orig_size: tuple,
                  dim: int,
                  center_momentum: float,
                  param_momentum: float,
@@ -39,18 +46,39 @@ class DINO(pl.LightningModule):
                  ft_freeze_backbone: bool,
                  finetune_batch_norm: bool,
                  finetune_task_adapt: bool,
+                 use_bn_in_head: bool,
+                 norm_last_layer: bool,
+                 drop_path_rate: float,
                  gnn_opts: dict,
                  eval_ways: int = 5
                  ):
         super(DINO, self).__init__()
-        self.teacher = encoder
-        self.student = copy.deepcopy(self.teacher)
+        self.gnn_opts = gnn_opts
+        self.encoder = encoder
+
+        if self.encoder["model"] in vits.__dict__.keys():
+            self.student = Model(dev=encoder["dev"], encoder=encoder["model"], gnn=gnn_opts["use"], gnn_opts=gnn_opts,
+                                 dim=dim,
+                                 use_bn_in_head=use_bn_in_head, norm_last_layer=norm_last_layer, head=encoder["head"],
+                                 drop_path_rate=drop_path_rate,
+                                 img_orig_size=img_orig_size)
+            self.teacher = Model(dev=encoder["dev"], encoder=encoder["model"], gnn=gnn_opts["use"], gnn_opts=gnn_opts,
+                                 dim=dim,
+                                 use_bn_in_head=use_bn_in_head, norm_last_layer=True, head=encoder["head"],
+                                 img_orig_size=img_orig_size)
+            self.adamw = True
+        elif self.encoder["model"] == "conv4":
+            self.student = Model(dev=encoder["dev"], img_orig_size=img_orig_size, gnn_opts=gnn_opts)
+            self.teacher = copy.deepcopy(self.student)
+            self.adamw = False
 
         self.lr = lr
+        self.min_lr = min_lr
+        self.warmup_epochs = warmup_epochs
         self.lr_sch = lr_sch
         self.lr_decay_step = lr_decay_step
         self.lr_decay_rate = lr_decay_rate
-        self.loss_fn = loss_fn
+        self.loss_fn = loss_fn  # can be Hloss or DINOLoss
         self.c_mom = center_momentum
         self.p_mom = param_momentum
 
@@ -75,13 +103,24 @@ class DINO(pl.LightningModule):
         self.save_hyperparameters()
 
     def configure_optimizers(self):
-        opt = FusedAdam(self.student.parameters(), lr=self.lr)
+        opt = deepspeed.ops.adam.FusedAdam(self.student.parameters(), lr=self.lr, adam_w_mode=self.adamw)
+        ret = {"optimizer": opt}
         if self.lr_sch == "step":
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
-            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+        elif self.lr_sch == "cosine":
+            sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
+                                                                    warmup_epochs=self.warmup_epochs,
+                                                                    max_epochs=self.trainer.max_epochs,
+                                                                    warmup_start_lr=self.lr,
+                                                                    eta_min=self.min_lr)
+        ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
+    def on_train_start(self) -> None:
+        self.student.gnn.to(self.device)
+
     def loss_calculation(self, batch: Tuple[torch.Tensor, torch.Tensor]):
+        # TODO: use local crops as well
         o, v = batch
         s1, s2 = self.student(o), self.student(v)
         t1, t2 = self.teacher(o), self.teacher(v)
@@ -111,7 +150,7 @@ class DINO(pl.LightningModule):
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
                               freeze_backbone=False, finetune_batch_norm=False,
-                              inner_lr=0.001, total_epoch=15, n_way=5, ec=None, fusion=None):
+                              inner_lr=0.001, total_epoch=15, n_way=5):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -147,9 +186,9 @@ class DINO(pl.LightningModule):
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
             classifier.init_params_from_prototypes(z_a_i, n_way, n_support)
-        classifier_opt = FusedAdam(classifier.parameters(), lr=inner_lr)
+        classifier_opt = deepspeed.ops.adam.FusedAdam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
-            delta_opt = torch.optim.Adam(
+            delta_opt = deepspeed.ops.adam.FusedAdam(
                 filter(lambda p: p.requires_grad, encoder.parameters()), lr=inner_lr)
             # TODO: add provisions for EdgeConv layer here until then freeze_backbone=False
         # Finetuning
@@ -209,8 +248,6 @@ class DINO(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
-        ec = self.ec if hasattr(self, "ec") else nn.Identity()
-        fusion = self.fusion if hasattr(self, "fusion") else nn.Identity()
 
         original_encoder_state = copy.deepcopy(self.state_dict())
 
@@ -222,9 +259,7 @@ class DINO(pl.LightningModule):
                                                    freeze_backbone=self.ft_freeze_backbone,
                                                    finetune_batch_norm=self.finetune_batch_norm,
                                                    device=self.device,
-                                                   n_way=self.eval_ways,
-                                                   ec=ec,
-                                                   fusion=fusion)
+                                                   n_way=self.eval_ways)
             self.load_state_dict(original_encoder_state)
 
         elif not self.sup_finetune:
@@ -239,17 +274,36 @@ class DINO(pl.LightningModule):
             'val_accuracy': acc
         }, prog_bar=True)
 
+    def test_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+        self.log_dict({
+            'test_loss': loss.detach(),
+            'test_accuracy': acc
+        }, prog_bar=True, on_step=True, on_epoch=True)
+
 
 class Model(nn.Module):
-    def __init__(self, encoder='conv4', gnn=True, gnn_opts: dict = None, dev="cpu", img_orig_size=(84, 84)):
+    def __init__(self, encoder='conv4', gnn=True, gnn_opts: dict = None, dim=None, use_bn_in_head=False,
+                 norm_last_layer=False, drop_path_rate=0., dev="cpu", head: bool = True,
+                 img_orig_size=(84, 84)):
         super(Model, self).__init__()
         self.gnn_opts = gnn_opts
+        self.encoder = encoder
         if encoder == "conv4":
             self.backbone = CNN_4Layer(in_channels=3, global_pooling=False)
+        elif encoder in ["vit_tiny", "vit_small", "vit_base"]:
+            self.backbone = vits.__dict__[encoder](patch_size=16, drop_path_rate=drop_path_rate)
+
+            self.backbone = dino_utils.MultiCropWrapper(self.backbone, vits.DINOHead(
+                self.backbone.embed_dim,
+                dim,
+                use_bn=use_bn_in_head,  # False
+                norm_last_layer=norm_last_layer,  # False for vit_small
+            ) if head else nn.Identity())
+        _, in_dim = self.backbone(torch.randn(1, 3, *img_orig_size)).flatten(1).shape
         if gnn:
-            _, in_dim = self.backbone(torch.randn(1, 3, *img_orig_size)).flatten(1).shape
             self.graph_generator = graph.graph_generator.GraphGenerator(dev=dev, **gnn_opts["graph_params"])
-            self.gnn = GNNReID(dev, gnn_opts["gnn_params"], in_dim).to(dev)
+            self.gnn = GNNReID(dev, gnn_opts["gnn_params"], in_dim)
 
     def forward(self, x):
         z = self.backbone(x)
@@ -264,6 +318,8 @@ def cli_main():
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     cli = DINOCli(DINO, FewShotDatamodule, save_config_overwrite=True, run=False,
                   parser_kwargs={"parser_mode": "omegaconf"})
+    if wandb.run is not None:
+        wandb.watch(cli.model)
     cli.trainer.fit(cli.model, cli.datamodule)
     cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.last_model_path, datamodule=cli.datamodule)
 
