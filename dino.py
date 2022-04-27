@@ -113,6 +113,8 @@ class DINO(pl.LightningModule):
                                                                     max_epochs=self.trainer.max_epochs,
                                                                     warmup_start_lr=self.lr,
                                                                     eta_min=self.min_lr)
+        else:
+            return ret
         ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
