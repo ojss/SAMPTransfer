@@ -4,7 +4,7 @@ model:
   lr: 0.0005
   min_lr: 1e-6
   warmup_epochs: 30
-  lr_sch: cosine
+  lr_sch: None
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   sup_finetune: True
