@@ -60,14 +60,11 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: bow.feature_extractor.CNN_4Layer
+    class_path: bow.feature_extractor.ViT
     init_args:
-      in_channels: 3
-      hidden_size: 64
-      out_channels: 64
-      ada_maxpool: False
-      global_pooling: False
-      graph_conv: False
+      arch: vit_micro
+      patch_size: 16
+      num_channels: 3
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5

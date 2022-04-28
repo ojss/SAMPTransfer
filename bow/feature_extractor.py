@@ -5,6 +5,7 @@ import torch.nn as nn
 import torchvision.models as models
 
 from . import bow_utils as utils
+import vision_transformer as vits
 
 
 class SequentialFeatureExtractorAbstractClass(nn.Module):
@@ -337,6 +338,19 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
     #     return self.encoder(inputs)
 
 
+class ViT(nn.Module):
+    def __init__(self, arch: str, patch_size: int, num_channels: int):
+        super(ViT, self).__init__()
+        self.arch = arch
+        self.patch_size = patch_size
+        self.num_channels = num_channels
+        if arch in vits.__dict__.keys():
+            self.encoder = vits.__dict__[arch](patch_size=patch_size)
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
 def FeatureExtractor(arch, opts):
     all_architectures = (
         'wrn', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
@@ -347,6 +361,9 @@ def FeatureExtractor(arch, opts):
     if arch == 'conv4':
         conv4 = CNN_4Layer(in_channels=3)
         return conv4, conv4.num_channels
+    elif arch in vits.__dict__.keys():
+        vit = vits.__dict__[arch](**opts)
+        return vit
     elif arch == 'wrn':
         num_channels = opts["widen_factor"] * 64
         return WideResNet(**opts), num_channels
