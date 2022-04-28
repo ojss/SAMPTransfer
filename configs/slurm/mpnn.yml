@@ -85,6 +85,7 @@ trainer:
   num_sanity_val_steps: 2
   fast_dev_run: False
   max_epochs: 2500
+  check_val_every_n_epoch: 10
   min_epochs: 1000
   limit_train_batches: 100
   limit_val_batches: 15
@@ -105,7 +106,7 @@ trainer:
         filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
         monitor: "train_accuracy_epoch"
         save_last: True
-        save_top_k: 3
+        save_top_k: 2
         every_n_epochs: 1
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
