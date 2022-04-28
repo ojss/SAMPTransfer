@@ -288,18 +288,18 @@ class ResNet(SequentialFeatureExtractorAbstractClass):
         self.num_channels = net.fc.in_features
 
 
-def conv3x3(in_channels, out_channels, maxpool=True, **kwargs):
+def conv3x3(in_channels, out_channels, ada_maxpool=False, **kwargs):
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, **kwargs),
         nn.BatchNorm2d(out_channels),
         nn.ReLU(),
-        nn.MaxPool2d(2) if maxpool else nn.Identity()
+        nn.MaxPool2d(2) if not ada_maxpool else nn.AdaptiveMaxPool2d(5)
     )
 
 
 class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
-    def __init__(self, in_channels: int, out_channels=64, hidden_size=64, last_maxpool=True, global_pooling=True,
-                 graph_conv=False):
+    def __init__(self, in_channels: int, out_channels=64, hidden_size=64, global_pooling=True,
+                 graph_conv=False, ada_maxpool=False):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_size = hidden_size
@@ -316,7 +316,8 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
         all_feat_names.append('block3')
 
         feature_blocks.append(
-            conv3x3(hidden_size, out_channels) if last_maxpool else conv3x3(hidden_size, out_channels, maxpool=False))
+            conv3x3(hidden_size, out_channels) if not ada_maxpool else conv3x3(hidden_size, out_channels,
+                                                                               ada_maxpool=True))
         all_feat_names.append('block4')
 
         if global_pooling:
