@@ -13,8 +13,8 @@ slurm:
     gres: gpu:a40:1
     signal: SIGUSR1@90
 model:
-  optim: "radam"
-  lr_sch: "step"
+  optim: adam
+  lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   eta_min: 5e-5
@@ -26,24 +26,7 @@ model:
   bow_clr: False
   clr_loss: False
   clr_on_bow: False
-  graph_conv_opts:
-    use_graph_conv: False
-    k: 5
-    aggregation: mean
-    mlp: False
-    task_adapt: False
-    m_scale:
-      use_m_scale: False
-      m_scale_projector_dim: 512
-      attn_pooling: False
-      attn_inner_dim: 64
-      heads: 1
-      graph_conv: False
-      resizing: interpolate
-  mpnn_loss_fn:
-    class_path: losses.CrossEntropyLabelSmooth
-    init_args:
-      num_classes: ${data.batch_size}
+  mpnn_loss_fn: ce
   mpnn_opts:
     _use: True
     loss_cnn: True
@@ -63,7 +46,7 @@ model:
       gnn:
         num_layers: 1
         aggregator: "add"
-        num_heads: 2
+        num_heads: 1
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -94,6 +77,7 @@ model:
       in_channels: 3
       hidden_size: 64
       out_channels: 64
+      ada_maxpool: False
       global_pooling: False
       graph_conv: False
 trainer:
@@ -123,11 +107,6 @@ trainer:
         save_last: True
         save_top_k: 3
         every_n_epochs: 1
-        mode: "max"
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        patience: 200
-        monitor: "train_accuracy_epoch"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:

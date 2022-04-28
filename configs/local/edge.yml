@@ -1,8 +1,8 @@
 job_name: local_test
 seed_everything: 72
 model:
-  optim: "radam"
-  lr_sch:
+  optim: adam
+  lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   eta_min: 5e-5
@@ -10,31 +10,13 @@ model:
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
-  alpha_cosine: True
+  alpha_cosine: False
   bow_clr: False
   clr_loss: False
   clr_on_bow: False
-  graph_conv_opts:
-    use_graph_conv: False
-    k: 5
-    aggregation: mean
-    mlp: False
-    task_adapt: False
-    m_scale:
-      use_m_scale: False
-      m_scale_projector_dim: 512
-      attn_pooling: False
-      attn_inner_dim: 64
-      heads: 1
-      graph_conv: False
-      resizing: interpolate
-  mpnn_loss_fn: "ce"
-  #    class_path: losses.CrossEntropyLabelSmooth
-  #    init_args:
-  #      num_classes: ${data.batch_size}
+  mpnn_loss_fn: ce
   mpnn_opts:
     _use: True
-    gat_version: v1
     loss_cnn: True
     scaling_ce: 1
     task_adapt: False
@@ -50,9 +32,9 @@ model:
       cat: 0
       every: 0
       gnn:
-        num_layers: 2
+        num_layers: 1
         aggregator: "add"
-        num_heads: 8
+        num_heads: 1
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -70,7 +52,7 @@ model:
         use_batchnorm: 0
   vicreg_opts:
     use_vicreg: False
-  bow_levels: [ "block3", "block4" ]
+  bow_levels: [ "block3" ]
   bow_extractor_opts:
     inv_delta: 10
     num_words: 8192
@@ -78,17 +60,14 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: bow.feature_extractor.ResNet
+    class_path: bow.feature_extractor.CNN_4Layer
     init_args:
-      arch: resnet18
-      global_pooling: True
-      red: 4
-#    class_path: bow.feature_extractor.CNN_4Layer
-#    init_args:
-#      in_channels: 3
-#      hidden_size: 64
-#      out_channels: 64
-#      global_pooling: False
+      in_channels: 3
+      hidden_size: 64
+      out_channels: 64
+      ada_maxpool: False
+      global_pooling: False
+      graph_conv: False
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5

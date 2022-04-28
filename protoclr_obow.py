@@ -1,9 +1,10 @@
 __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
-import os.path
+import uuid
 from typing import Optional, Iterable, Union
 
+from deepspeed.ops.adam import FusedAdam
 import math
 import numpy as np
 import pl_bolts.optimizers
@@ -12,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
+from torch_geometric.data import Data
 from omegaconf import OmegaConf
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
@@ -25,10 +27,8 @@ from bow.classification import PredictionHead
 from bow.feature_extractor import CNN_4Layer
 from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
-from fusion import AFF
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
-from losses import CrossEntropyLabelSmooth
 from proto_utils import (get_prototypes,
                          prototypical_loss)
 
@@ -114,7 +114,6 @@ class PCLROBoW(pl.LightningModule):
                  clr_loss: bool,
                  bow_clr: bool,
                  clr_on_bow: bool,
-                 graph_conv_opts: dict,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  vicreg_opts: dict,
@@ -181,7 +180,7 @@ class PCLROBoW(pl.LightningModule):
             self.bow_extractor = BoWExtractorMultipleLevels(bow_extractor_opts_list)
 
         # Building teacher network
-        if not clr_on_bow and not graph_conv_opts["use_graph_conv"] and not mpnn_opts["_use"]:
+        if not clr_on_bow and not mpnn_opts["_use"]:
             # TODO: graph only on one network for now
             # CLR on BoW to be implemented as just one network
             self.feature_extractor_teacher = copy.deepcopy(self.feature_extractor)
@@ -228,29 +227,6 @@ class PCLROBoW(pl.LightningModule):
         self.ft_freeze_backbone = ft_freeze_backbone
         self.finetune_batch_norm = finetune_batch_norm
 
-        self.graph_conv = graph_conv_opts["use_graph_conv"]
-        self.graph_conv_opts = graph_conv_opts
-
-        if self.graph_conv:
-            _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
-            if graph_conv_opts["mlp"]:
-                self.fc1 = nn.Sequential(
-                    nn.Linear(in_features=in_dim * 2, out_features=in_dim * 2),
-                    nn.ReLU(),
-                    nn.Linear(in_features=in_dim * 2, out_features=in_dim)
-                )
-            elif gr_mscale_opts := graph_conv_opts["m_scale"]:
-                feats = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size), self._bow_levels)
-                _, coarse_in_dim = feats[0].flatten(1).shape
-                _, fine_in_dim = feats[1].flatten(1).shape
-
-                if gr_mscale_opts["attn_pooling"]:
-                    self.fusion = AFF(channels=64)
-                    self.ec = gnn.DynamicEdgeConv(
-                        nn.Linear(in_features=fine_in_dim * 2, out_features=fine_in_dim),
-                        k=graph_conv_opts["k"],
-                        aggr=graph_conv_opts["aggregation"]
-                    )
         self.mpnn_opts = mpnn_opts
         if mpnn_opts["_use"]:
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
@@ -409,18 +385,21 @@ class PCLROBoW(pl.LightningModule):
             features = self.feature_extractor_teacher(img_orig, self._bow_levels)
             features = features if isinstance(features, torch.Tensor) else features[-1]
             features = features.detach()
-            loss_cls, accuracy = self._linear_classifier(features, labels)
-        return loss_cls, accuracy
+            loss_cls, acc = self._linear_classifier(features, labels)
+        return loss_cls, acc
 
     def configure_optimizers(self):
         # TODO: make this bit configurable
         parameters = filter(lambda p: p.requires_grad, self.parameters())
+        ret = {}
         if self.optim == 'sgd':
             opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
         elif self.optim == 'adam':
-            opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+            opt = FusedAdam(parameters, lr=self.lr, weight_decay=self.weight_decay)
         elif self.optim == 'radam':
             opt = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+
+        ret["optimizer"] = opt
 
         if self.lr_sch == 'cos':
             sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
@@ -434,14 +413,12 @@ class PCLROBoW(pl.LightningModule):
             ret = {'optimizer': opt, 'lr_scheduler': sch}
         elif self.lr_sch == 'step':
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
-            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
+            ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         elif self.lr_sch == "one_cycle":
             sch = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=self.lr,
                                                       steps_per_epoch=self.trainer.limit_train_batches,
                                                       epochs=self.trainer.max_epochs)
-            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step'}}
-        else:
-            ret = {'optimizer': opt}
+            ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
     def forward(self, x, x_prime, labels=None):
@@ -504,28 +481,6 @@ class PCLROBoW(pl.LightningModule):
             feats = torch.cat([features_o_stu.flatten(1), features[0].flatten(1)])
 
         return losses, logs, feats
-
-    def _shared_gcn_step(self, feature_extractor, fusion, ec, x_support, x_query, mode='adapt'):
-        if mode == 'adapt':
-            z = feature_extractor(torch.cat([x_support, x_query]), self._bow_levels)
-        else:
-            z = feature_extractor(x_support, self._bow_levels)
-        if self.graph_conv_opts["m_scale"]["resizing"] == 'avg':
-            z0 = F.avg_pool2d(z[0], 2)  # TODO: replace with padding and Laplacian graph method to check later
-        elif self.graph_conv_opts["m_scale"]["resizing"] == 'interpolate':
-            z0 = F.interpolate(z[0], scale_factor=.5)
-        z1 = z[1]
-        z = fusion(z1, z0)
-        z = z.flatten(1)
-        z = ec(z)  # replace with Laplacian method to check later
-        return z
-
-    def gcn_forward(self, x_support, y_support, x_query, y_query, ways):
-        z = self._shared_gcn_step(self.feature_extractor, self.fusion, self.ec, x_support, x_query)
-
-        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
-
-        return loss, acc, z
 
     @torch.enable_grad()
     def _clr_on_bow_forward(self, x_support, y_support, x_query, y_query, ways):
@@ -600,12 +555,10 @@ class PCLROBoW(pl.LightningModule):
             loss, acc, z = self._clr_on_bow_forward(x_support, y_support, x_query, y_query, ways)
         elif self.mpnn_opts["_use"]:
             loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
-        elif self.graph_conv:
-            loss, acc, z = self.gcn_forward(x_support, y_support, x_query, y_query, ways)
         else:
             losses, logs, z = self.forward(x_support, [x_query])
 
-        if not self.clr_on_bow and not self.graph_conv and not self.mpnn_opts["_use"]:
+        if not self.clr_on_bow and not self.mpnn_opts["_use"]:
             loss = losses.sum()
             self.log("bow_loss", loss.item(), prog_bar=True)
 
@@ -630,7 +583,7 @@ class PCLROBoW(pl.LightningModule):
     @torch.enable_grad()
     def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
                               freeze_backbone=False, finetune_batch_norm=False,
-                              inner_lr=0.001, total_epoch=15, n_way=5, ec=None, fusion=None):
+                              inner_lr=0.001, total_epoch=15, n_way=5):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -650,34 +603,7 @@ class PCLROBoW(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
 
-        if self.graph_conv and not self.graph_conv_opts["task_adapt"] and not \
-                self.graph_conv_opts["m_scale"]["use_m_scale"]:
-            encoder.eval()
-            ec.eval()
-            z_a_i = (encoder(x_a_i.to(self.device))).flatten(1)  # .view(*x_a_i.shape[:-3], -1))
-            z_a_i = ec(z_a_i)
-            ec.train()
-            encoder.train()
-        elif self.graph_conv and self.graph_conv_opts["task_adapt"]:
-            encoder.eval()
-            ec.eval()
-            x = torch.cat([x_a_i, x_b_i])
-            z_a_i = encoder(x).flatten(1)
-            z_a_i = ec(z_a_i)
-            z_a_i = z_a_i[:support_size, :]
-            ec.train()
-            encoder.train()
-        elif self.graph_conv and self.graph_conv_opts["m_scale"]["use_m_scale"]:
-            encoder.eval()
-            fusion.train()
-            ec.eval()
-            z_a_i = self._shared_gcn_step(
-                encoder, fusion, ec, x_a_i, x_b_i, mode='no_adapt'
-            )
-            ec.train()
-            fusion.train()
-            encoder.train()
-        elif self.mpnn_opts["_use"]:
+        if self.mpnn_opts["_use"]:
             self.eval()
             if self.mpnn_opts["task_adapt"]:
                 _, _, z = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_b_i]))
@@ -737,15 +663,6 @@ class PCLROBoW(pl.LightningModule):
                 if self.mpnn_opts["_use"]:
                     _, _, output = self.mpnn_shared_step(z_batch, y_batch)
                     output = output[0]
-                elif self.graph_conv:
-                    output = self._shared_gcn_step(
-                        encoder,
-                        fusion,
-                        ec,
-                        z_batch,
-                        None,
-                        mode="no_adapt"
-                    )
                 else:
                     output = encoder(z_batch).flatten(1)
 
@@ -771,8 +688,6 @@ class PCLROBoW(pl.LightningModule):
             else:
                 _, _, output = self.mpnn_shared_step(x_b_i, y_query)
                 output = output[0]
-        elif self.graph_conv:
-            output = self._shared_gcn_step(encoder, fusion, ec, x_b_i, None, mode="no_adapt")
         else:
             output = encoder(x_b_i).flatten(1)
 
@@ -818,8 +733,6 @@ class PCLROBoW(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
-        ec = self.ec if hasattr(self, "ec") else nn.Identity()
-        fusion = self.fusion if hasattr(self, "fusion") else nn.Identity()
 
         original_encoder_state = copy.deepcopy(self.state_dict())
 
@@ -831,9 +744,7 @@ class PCLROBoW(pl.LightningModule):
                                                    freeze_backbone=self.ft_freeze_backbone,
                                                    finetune_batch_norm=self.finetune_batch_norm,
                                                    device=self.device,
-                                                   n_way=self.eval_ways,
-                                                   ec=ec,
-                                                   fusion=fusion)
+                                                   n_way=self.eval_ways, )
             self.load_state_dict(original_encoder_state)
 
         elif not self.sup_finetune:
@@ -899,28 +810,10 @@ class PCLROBoW(pl.LightningModule):
 
         return model_opts
 
-    # def train_dataloader(self):
-    #     train_loader, train_sampler, _, test_loader, _, _ = bow.datasets.get_data_loaders_for_OBoW(
-    #         dataset_name="ImageNet",
-    #         batch_size=8,
-    #         workers=0,
-    #         distributed=False,
-    #         epoch_size=None,
-    #         data_dir="~/projects/data/imagenette2/")
-    #     return train_loader
-    #
-    # def val_dataloader(self):
-    #     train_loader, train_sampler, _, test_loader, _, _ = bow.datasets.get_data_loaders_for_OBoW(
-    #         dataset_name="ImageNet",
-    #         batch_size=8,
-    #         workers=0,
-    #         distributed=False,
-    #         epoch_size=None,
-    #         data_dir="~/projects/data/imagenette2/")
-    #     return test_loader
-
 
 def cli_main():
+    UUID = uuid.uuid4()
+    OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
                 save_config_overwrite=True,
                 parser_kwargs={"parser_mode": "omegaconf"})
@@ -930,6 +823,7 @@ def cli_main():
 
 def slurm_main(conf_path, UUID):
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
+    print(conf_path)
     cli = MyCLI(PCLROBoW, UnlabelledDataModule, run=False,
                 save_config_overwrite=True,
                 save_config_filename=str(UUID),
