@@ -230,6 +230,7 @@ class PCLROBoW(pl.LightningModule):
         self.mpnn_opts = mpnn_opts
         if mpnn_opts["_use"]:
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+            self.dim = in_dim
             self.gnn = GNNReID(self.device, mpnn_opts["gnn_params"], in_dim).to(self.device)
             self.graph_generator = GraphGenerator(self.device, **mpnn_opts["graph_params"])
             self.mpnn_temperature = mpnn_opts["temperature"]
@@ -286,7 +287,7 @@ class PCLROBoW(pl.LightningModule):
     def _vicreg_loss(self, x, y):
         # TODO: remove representation loss since BoW Loss already handles this
         # repr_loss = F.mse_loss(x, y)
-
+        effective_batch_size = (self.n_support + self.n_query) * self.batch_size
         x = self.all_gather(x)
         y = self.all_gather(y)
 
@@ -297,12 +298,12 @@ class PCLROBoW(pl.LightningModule):
         std_y = torch.sqrt(y.var(dim=0) + 1e-4)
         std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
 
-        cov_x = (x.T @ x) / (self.batch_size - 1)
-        cov_y = (y.T @ y) / (self.batch_size - 1)
+        cov_x = (x.T @ x) / (effective_batch_size - 1)
+        cov_y = (y.T @ y) / (effective_batch_size - 1)
         cov_loss = vic_utils.off_diagonal(cov_x).pow_(2).sum().div(
             # Since we are currently only operating on the BoW representations and not the encoder representations
-            self.num_words  # TODO: pull this out of BoW predictor opts
-        ) + vic_utils.off_diagonal(cov_y).pow_(2).sum().div(self.num_words)
+            self.dim  # TODO: pull this out of BoW predictor opts
+        ) + vic_utils.off_diagonal(cov_y).pow_(2).sum().div(self.dim)
 
         loss = self.vicreg['std_coeff'] * std_loss + self.vicreg['cov_coeff'] * cov_loss
         return loss
@@ -324,20 +325,6 @@ class PCLROBoW(pl.LightningModule):
         teacher_params = self.feature_extractor_teacher.parameters()
         for param, param_teacher in zip(student_params, teacher_params):
             param_teacher.data.mul_(alpha).add_(param.detach().data, alpha=(1. - alpha))
-
-    @torch.no_grad()
-    def _dequeue_and_enqueue(self, keys):
-        # TODO: fix this for using with multiple gpus or copy the concat gather function
-        keys = self.all_gather(keys)
-        batch_size = keys.shape[0]
-
-        ptr = int(self.queue_ptr)
-        assert self.K % batch_size == 0  # for simplicity and partity with the BoW bits
-
-        # replace the keys at the ptr location (dequeue and enqueue)
-        self.queue[:, ptr: ptr + batch_size] = keys.T
-        ptr = (ptr + batch_size) % self.K
-        self.queue_ptr[0] = ptr
 
     def _bow_loss(self, bow_prediction, bow_target):
         assert isinstance(bow_prediction, (list, tuple))
