@@ -143,3 +143,5 @@ cython_debug/
 /ckpts
 wandb_logs/
 expts/
+*.hdf5
+*.ckpt
