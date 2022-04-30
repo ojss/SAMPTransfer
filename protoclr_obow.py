@@ -4,7 +4,6 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union
 
-from deepspeed.ops.adam import FusedAdam
 import math
 import numpy as np
 import pl_bolts.optimizers
@@ -12,8 +11,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch_geometric.nn as gnn
-from torch_geometric.data import Data
+from deepspeed.ops.adam import FusedAdam
 from omegaconf import OmegaConf
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
@@ -805,7 +803,7 @@ def cli_main():
                 save_config_overwrite=True,
                 parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model, cli.datamodule)
-    cli.trainer.test(datamodule=cli.datamodule)
+    cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.best_model_path, datamodule=cli.datamodule)
 
 
 def slurm_main(conf_path, UUID):
@@ -816,7 +814,7 @@ def slurm_main(conf_path, UUID):
                 save_config_filename=str(UUID),
                 parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
     cli.trainer.fit(cli.model, cli.datamodule)
-    cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.last_model_path, datamodule=cli.datamodule)
+    cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.best_model_path, datamodule=cli.datamodule)
     # deleting tmp config file:
     # if os.path.isfile(conf_path):
     #     os.remove(conf_path)
