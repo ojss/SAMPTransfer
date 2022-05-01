@@ -1,4 +1,4 @@
-job_name: local_swav
+job_name: swav-${uuid:}
 seed_everything: 72
 nmb_crops: [ 2,  6 ]
 size_crops: [ 224,  96 ]
@@ -105,14 +105,23 @@ trainer:
   fast_dev_run: 1
   max_epochs: 800
   check_val_every_n_epochs: 10
+  limit_val_batches: 15
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: SWaV
+      save_dir: wandb_logs
+      log_model: True
+      name: ${job_name}
   callbacks:
-    - class_path: pl_bolts.callbacks.ssl_online.SSLOnlineEvaluator
-      init_args:
-        drop_p: 0.0
-        hidden_dim: null
-        z_dim: ${model.feat_dim}
-        num_classes: 600
-        dataset: miniimagenet
+    #    - class_path: pl_bolts.callbacks.ssl_online.SSLOnlineEvaluator
+    #      init_args:
+    #        drop_p: 0.0
+    #        hidden_dim: null
+    #        z_dim: ${model.feat_dim}
+    #        num_classes: 600
+    #        dataset: miniimagenet
     - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
       init_args:
         max_depth: 3

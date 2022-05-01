@@ -1,11 +1,13 @@
 """Adapted from official swav implementation: https://github.com/facebookresearch/swav."""
-import os
-
 import copy
+import os
+import uuid
+
 import deepspeed
 import numpy as np
 import torch
 import torch.nn.functional as F
+from omegaconf import OmegaConf
 from pl_bolts.models.self_supervised.swav.swav_resnet import resnet18, resnet50
 from pl_bolts.optimizers.lars import LARS
 from pl_bolts.optimizers.lr_scheduler import linear_warmup_decay
@@ -607,6 +609,8 @@ class SWaVCli(LightningCLI):
 
 def cli_main():
     from pl_bolts.models.self_supervised.swav.transforms import SwAVEvalDataTransform, SwAVTrainDataTransform
+    UUID = uuid.uuid4()
+    OmegaConf.register_resolver("uuid", lambda: UUID)
 
     cli = SWaVCli(SwAV, FullSizeMiniImagenetDataModule, run=False, parser_kwargs={"parser_mode": "omegaconf"})
     args = cli.config["model"]
@@ -660,6 +664,7 @@ def cli_main():
     # )
 
     cli.trainer.fit(model, datamodule=dm)
+    cli.trainer.test(ckpt_path=cli.trainer.checkpoint_callback.best_model_path, datamodule=cli.datamodule)
 
 
 if __name__ == "__main__":
