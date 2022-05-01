@@ -42,4 +42,4 @@ module load miniconda/3.9
 
 source activate /home/nfs/oshirekar/unsupervised_ml/ai2
 
-srun python dino.py --config "$1"
+srun python swav.py --config "$1"
