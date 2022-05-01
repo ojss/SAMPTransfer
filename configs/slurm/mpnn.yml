@@ -46,7 +46,7 @@ model:
       gnn:
         num_layers: 1
         aggregator: "add"
-        num_heads: 1
+        num_heads: 8
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -72,14 +72,10 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: bow.feature_extractor.CNN_4Layer
+    class_path: bow.feature_extractor.ResNet
     init_args:
-      in_channels: 3
-      hidden_size: 64
-      out_channels: 64
-      ada_maxpool: False
+      arch: resnet18
       global_pooling: False
-      graph_conv: False
 trainer:
   gpus: -1
   num_sanity_val_steps: 2
@@ -104,7 +100,7 @@ trainer:
       init_args:
         dirpath: ./ckpts/${job_name}
         filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
-        monitor: "train_accuracy_epoch"
+        monitor: "val_accuracy"
         save_last: True
         save_top_k: 2
         every_n_epochs: 1
@@ -123,7 +119,7 @@ data:
   n_support: 1
   n_query: 3
   batch_size: 64
-  num_workers: 6
+  num_workers: 8
   tfm_method: vicreg
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
