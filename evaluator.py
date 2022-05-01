@@ -1,9 +1,8 @@
 import argparse
 
 import pytorch_lightning as pl
-import torch
 
-from bow.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import CNN_4Layer
 from callbacks import ConfidenceIntervalCallback
 from dataloaders import UnlabelledDataModule
 from protoclr_obow import PCLROBoW

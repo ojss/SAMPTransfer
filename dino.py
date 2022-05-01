@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 import graph.graph_generator
 import misc.dino_utils as dino_utils
 import misc.vision_transformer as vits
-from bow.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import CNN_4Layer
 from cli.custom_cli import DINOCli
 from dino_dataloader import FewShotDatamodule
 from graph.gnn_base import GNNReID

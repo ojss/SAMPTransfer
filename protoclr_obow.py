@@ -22,7 +22,7 @@ import vicreg.utils as vic_utils
 from bow.bow_extractor import BoWExtractorMultipleLevels
 from bow.bowpredictor import BoWPredictor
 from bow.classification import PredictionHead
-from bow.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import CNN_4Layer
 from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
 from graph.gnn_base import GNNReID
