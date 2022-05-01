@@ -10,6 +10,8 @@ from pl_bolts.transforms.dataset_normalizations import imagenet_normalization
 from pl_bolts.utils import _TORCHVISION_AVAILABLE
 from pl_bolts.utils.warnings import warn_missing_pkg
 
+from dataloaders import get_episode_loader
+
 if _TORCHVISION_AVAILABLE:
     from torchvision import transforms as transform_lib, datasets
 else:  # pragma: no cover
@@ -56,6 +58,10 @@ class FullSizeMiniImagenetDataModule(LightningDataModule):
     def __init__(
             self,
             data_dir: str,
+            fsl_datapath: str,
+            eval_ways: int = 5,
+            eval_support_shots: int = 5,
+            eval_query_shots: int = 15,
             meta_dir: Optional[str] = None,
             num_imgs_per_val_class: int = 600,
             image_size: int = 224,
@@ -90,6 +96,10 @@ class FullSizeMiniImagenetDataModule(LightningDataModule):
         self.image_size = image_size
         self.dims = (3, self.image_size, self.image_size)
         self.data_dir = data_dir
+        self.fsl_data_path = fsl_datapath
+        self.eval_ways = eval_ways
+        self.eval_support_shots = eval_support_shots
+        self.eval_query_shots = eval_query_shots
         self.num_workers = num_workers
         self.meta_dir = meta_dir
         self.num_imgs_per_val_class = num_imgs_per_val_class
@@ -155,38 +165,26 @@ class FullSizeMiniImagenetDataModule(LightningDataModule):
             batch_size: the batch size
             transforms: the transforms
         """
-        transforms = self.val_transform() if self.val_transforms is None else self.val_transforms
-
-        dataset = FullSizeDataset(
-            self.data_dir + "/val",
-            transform=transforms,
-        )
-        loader: DataLoader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            drop_last=self.drop_last,
-            pin_memory=self.pin_memory,
-        )
-        return loader
+        dataloader_val = get_episode_loader("miniimagenet", self.fsl_data_path,
+                                            ways=self.eval_ways,
+                                            shots=self.eval_support_shots,
+                                            test_shots=self.eval_query_shots,
+                                            batch_size=1,
+                                            split='val',
+                                            num_workers=2)
+        return dataloader_val
 
     def test_dataloader(self) -> DataLoader:
         """Uses the validation split of imagenet2012 for testing."""
-        transforms = self.val_transform() if self.test_transforms is None else self.test_transforms
-
-        dataset = UnlabeledImagenet(
-            self.data_dir + "/test", transform=transforms
-        )
-        loader: DataLoader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            drop_last=self.drop_last,
-            pin_memory=self.pin_memory,
-        )
-        return loader
+        dataloader_test = get_episode_loader("miniimagenet", self.fsl_data_path,
+                                             ways=self.eval_ways,
+                                             shots=self.eval_support_shots,
+                                             test_shots=self.eval_query_shots,
+                                             batch_size=1,
+                                             split='test',
+                                             shuffle=False,
+                                             num_workers=6)
+        return dataloader_test
 
     def train_transform(self) -> Callable:
         """The standard imagenet transforms.

@@ -8,6 +8,8 @@ import torchvision.models as models
 
 import vision_transformer as vits
 from bow import bow_utils as utils
+from graph.gnn_base import GNNReID
+from graph.graph_generator import GraphGenerator
 
 
 class SequentialFeatureExtractorAbstractClass(nn.Module):
@@ -360,13 +362,14 @@ class SWaV_CNN_4Layer(nn.Module):
     def __init__(self, in_channels: int,
                  out_channels=64, hidden_size=64, global_pooling=True,
                  eval_mode=False, last_maxpool=False, ada_maxpool=False, normalize=True, output_dim=0, hidden_mlp=0,
-                 nmb_prototypes=0):
+                 nmb_prototypes=0, mpnn_opts=None):
         super(SWaV_CNN_4Layer, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_size = hidden_size
         self.global_pool = global_pooling
         self.eval_mode = eval_mode
+        self.mpnn_opts = mpnn_opts
         self.padding = nn.ConstantPad2d(1, 0.0)
 
         self.encoder = nn.Sequential(
@@ -404,6 +407,11 @@ class SWaV_CNN_4Layer(nn.Module):
         elif nmb_prototypes > 0:
             self.prototypes = nn.Linear(output_dim, nmb_prototypes, bias=False)
 
+        # GAT creation
+        if mpnn_opts["_use"]:
+            self.gnn = GNNReID("cuda", mpnn_opts["gnn_params"], output_dim).to("cuda")
+            self.graph_generator = GraphGenerator("cuda", **mpnn_opts["graph_params"])
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -411,11 +419,11 @@ class SWaV_CNN_4Layer(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward_backbone(self, x):
+    def forward_backbone(self, x, eval_mode=False):
         x = self.padding(x)
         x = self.encoder(x)
 
-        if self.eval_mode:
+        if self.eval_mode or eval_mode:
             return x
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
@@ -431,6 +439,9 @@ class SWaV_CNN_4Layer(nn.Module):
         if self.prototypes is not None:
             return x, self.prototypes(x)
         return x
+
+    def forward_gat(self, x):
+        pass
 
     def forward(self, inputs):
         if not isinstance(inputs, list):

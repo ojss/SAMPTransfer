@@ -1,9 +1,11 @@
 """Adapted from official swav implementation: https://github.com/facebookresearch/swav."""
 import os
 
+import copy
 import deepspeed
 import numpy as np
 import torch
+import torch.nn.functional as F
 from pl_bolts.models.self_supervised.swav.swav_resnet import resnet18, resnet50
 from pl_bolts.optimizers.lars import LARS
 from pl_bolts.optimizers.lr_scheduler import linear_warmup_decay
@@ -14,9 +16,13 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.cli import LightningCLI
 from torch import distributed as dist
 from torch import nn
+from torch.autograd import Variable
+from torchmetrics.functional import accuracy
+from tqdm.auto import tqdm
 
 from feature_extractors.feature_extractor import SWaV_CNN_4Layer
 from misc.FullSizeIMiniImagenet import FullSizeMiniImagenetDataModule
+from protoclr_obow import Classifier
 
 
 class SwAV(LightningModule):
@@ -26,6 +32,13 @@ class SwAV(LightningModule):
             num_samples: int,
             batch_size: int,
             dataset: str,
+            mpnn_opts: dict,
+            sup_finetune: bool,
+            sup_finetune_lr: float,
+            sup_finetune_epochs: int,
+            ft_freeze_backbone: bool,
+            finetune_batch_norm: bool,
+            eval_ways: int = 5,
             num_nodes: int = 1,
             arch: str = "resnet50",
             hidden_mlp: int = 2048,
@@ -127,6 +140,16 @@ class SwAV(LightningModule):
         self.warmup_epochs = warmup_epochs
         self.max_epochs = max_epochs
 
+        self.mpnn_opts = mpnn_opts
+
+        # fine-tuning
+        self.sup_finetune = sup_finetune
+        self.sup_finetune_lr = sup_finetune_lr
+        self.sup_finetune_epochs = sup_finetune_epochs
+        self.ft_freeze_backbone = ft_freeze_backbone
+        self.finetune_batch_norm = finetune_batch_norm
+        self.eval_ways = eval_ways
+
         if self.gpus * self.num_nodes > 1:
             self.get_assignments = self.distributed_sinkhorn
         else:
@@ -165,7 +188,8 @@ class SwAV(LightningModule):
                 normalize=True,
                 output_dim=self.feat_dim,
                 hidden_mlp=self.hidden_mlp,
-                nmb_prototypes=self.nmb_prototypes
+                nmb_prototypes=self.nmb_prototypes,
+                mpnn_opts=self.mpnn_opts
             )
         elif self.arch == "resnet18":
             backbone = resnet18
@@ -266,11 +290,174 @@ class SwAV(LightningModule):
         self.log("train_loss", loss, on_step=True, on_epoch=False)
         return loss
 
-    def validation_step(self, batch, batch_idx):
-        loss = self.shared_step(batch)
+    @torch.enable_grad()
+    def supervised_finetuning(self, encoder, episode, device='cpu', proto_init=True,
+                              freeze_backbone=False, finetune_batch_norm=False,
+                              inner_lr=0.001, total_epoch=15, n_way=5):
+        x_support = episode['train'][0][0]  # only take data & only first batch
+        x_support = x_support.to(device)
+        x_support_var = Variable(x_support)
+        x_query = episode['test'][0][0]  # only take data & only first batch
+        x_query = x_query.to(device)
+        x_query_var = Variable(x_query)
+        n_support = x_support.shape[0] // n_way
+        n_query = x_query.shape[0] // n_way
 
-        self.log("val_loss", loss, on_step=False, on_epoch=True)
-        return loss
+        batch_size = n_way
+        support_size = n_way * n_support
+
+        y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(
+            self.device)  # (25,)
+        y_b_i = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
+
+        x_b_i = x_query_var
+        x_a_i = x_support_var
+        z_a_i = encoder.forward_backbone(x_a_i, eval_mode=True).flatten(1)
+        encoder.eval()
+        if self.mpnn_opts["_use"]:
+            self.eval()
+            if self.mpnn_opts["task_adapt"]:
+                _, _, z = encoder.forward_gat(torch.cat([x_a_i, x_b_i]))
+                z = z[0]
+                z_a_i = z[:support_size, :]
+            else:
+                _, _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
+                z_a_i = z_a_i[0]
+            self.train()
+        encoder.train()
+
+        # Define linear classifier
+        input_dim = z_a_i.shape[1]
+        classifier = Classifier(input_dim, n_way=n_way)
+        classifier.to(device)
+        classifier.train()
+        ###############################################################################################
+        loss_fn = nn.CrossEntropyLoss().to(device)
+        # Initialise as distance classifer (distance to prototypes)
+        if proto_init:
+            classifier.init_params_from_prototypes(z_a_i, n_way, n_support)
+        classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
+        if freeze_backbone is False:
+            delta_opt = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, encoder.parameters()), lr=inner_lr)
+            # TODO: add provisions for EdgeConv layer here until then freeze_backbone=False
+        # Finetuning
+        if freeze_backbone is False:
+            encoder.train()
+        else:
+            encoder.eval()
+            self.eval()
+        classifier.train()
+        if not finetune_batch_norm:
+            for module in encoder.modules():
+                if isinstance(module, torch.nn.modules.BatchNorm2d):
+                    module.eval()
+
+        for epoch in tqdm(range(total_epoch), total=total_epoch, leave=False):
+            rand_id = np.random.permutation(support_size)
+
+            for j in range(0, support_size, batch_size):
+                classifier_opt.zero_grad()
+                if freeze_backbone is False:
+                    delta_opt.zero_grad()
+
+                #####################################
+                selected_id = torch.from_numpy(
+                    rand_id[j: min(j + batch_size, support_size)]).to(device)
+
+                z_batch = x_a_i[selected_id]
+                y_batch = y_a_i[selected_id]
+                #####################################
+                if self.mpnn_opts["_use"]:
+                    _, _, output = encoder.forward_gat(z_batch, y_batch)
+                    output = output[0]
+                else:
+                    output = encoder.forward_backbone(z_batch, eval_mode=True).flatten(1)
+
+                output = classifier(output)
+                loss = loss_fn(output, y_batch)
+
+                #####################################
+                loss.backward()
+
+                classifier_opt.step()
+
+                if freeze_backbone is False:
+                    delta_opt.step()
+        classifier.eval()
+        self.eval()
+
+        y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
+
+        if self.mpnn_opts["_use"]:
+            if self.mpnn_opts["task_adapt"]:
+                _, _, output = encoder.forward_gat(torch.cat([x_a_i, x_b_i]), )
+                output = output[0][support_size:, :]
+            else:
+                _, _, output = encoder.forward_gat(x_b_i)
+                output = output[0]
+        else:
+            output = encoder.forward_backbone(x_b_i, eval_mode=True).flatten(1)
+
+        scores = classifier(output)
+
+        loss = F.cross_entropy(scores, y_query, reduction='mean')
+        _, predictions = torch.max(scores, dim=1)
+        # acc = torch.mean(predictions.eq(y_query).float())
+        acc = accuracy(predictions, y_query)
+        return loss, acc.item()
+
+    def _shared_eval_step(self, batch, batch_idx):
+        loss = 0.
+        acc = 0.
+
+        original_encoder_state = copy.deepcopy(self.state_dict())
+
+        if self.sup_finetune:
+            loss, acc = self.supervised_finetuning(self.model,
+                                                   episode=batch,
+                                                   inner_lr=self.sup_finetune_lr,
+                                                   total_epoch=self.sup_finetune_epochs,
+                                                   freeze_backbone=self.ft_freeze_backbone,
+                                                   finetune_batch_norm=self.finetune_batch_norm,
+                                                   device=self.device,
+                                                   n_way=self.eval_ways)
+            self.load_state_dict(original_encoder_state)
+
+        elif not self.sup_finetune:
+            with torch.no_grad():
+                loss, acc = self.std_proto_form(batch, batch_idx)
+        return loss, acc
+
+    def validation_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+        self.log_dict({
+            'val_loss': loss.detach(),
+            'val_accuracy': acc
+        }, prog_bar=True)
+
+        return loss.item(), acc
+
+    def test_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+
+        self.log(
+            "test_loss",
+            loss.detach().item(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        self.log(
+            "test_acc",
+            acc,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        return loss.item(), acc
 
     def exclude_from_wt_decay(self, named_params, weight_decay, skip_list=("bias", "bn")):
         params = []
@@ -412,6 +599,7 @@ class SwAV(LightningModule):
 class SWaVCli(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_argument("--job_name", type=str, default="swav_local")
+        parser.link_arguments("data.eval_ways", "model.eval_ways")
         parser = SwAV.add_model_specific_args(parser)
         # training params
         parser.set_defaults({"trainer.fast_dev_run": 1, "trainer.num_nodes": 1, "trainer.gpus": 1})

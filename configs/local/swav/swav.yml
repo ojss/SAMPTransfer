@@ -26,7 +26,6 @@ model:
   start_lr: 0.3
   
   nmb_prototypes: 1800
-  online_ft: True
 
   num_samples: 0
   dataset: miniimagenet
@@ -43,6 +42,13 @@ model:
   exclude_bn_bias: False
   weight_decay: 1e-6
   epsilon: 0.05
+
+  sup_finetune: True
+  sup_finetune_lr: 1e-3
+  sup_finetune_epochs: 15
+  ft_freeze_backbone: True
+  finetune_batch_norm: False
+
   kwargs:
     input_height: ${input_height}
     size_crops: ${size_crops}
@@ -51,25 +57,57 @@ model:
     crops_for_assign: ${crops_for_assign}
     gaussian_blur: ${gaussian_blur}
     jitter_strength: ${jitter_strength}
+  mpnn_opts:
+    _use: False
+    loss_cnn: True
+    scaling_ce: 1
+    task_adapt: False
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 1
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
 
 
 data:
+  fsl_datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
   data_dir: /home/ojass/projects/data/processed_images/
+  eval_ways: 5
+  eval_support_shots: 5
+  eval_query_shots: 15
   batch_size: 10
   num_workers: 8
 
 trainer:
   fast_dev_run: 1
   max_epochs: 800
-  check_val_every_n_epochs: 10
+  check_val_every_n_epoch: 10
   callbacks:
-    - class_path: pl_bolts.callbacks.ssl_online.SSLOnlineEvaluator
-      init_args:
-        drop_p: 0.0
-        hidden_dim: null
-        z_dim: ${model.feat_dim}
-        num_classes: 600
-        dataset: miniimagenet
     - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
       init_args:
         max_depth: 3
