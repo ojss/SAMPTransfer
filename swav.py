@@ -612,7 +612,9 @@ def cli_main():
     UUID = uuid.uuid4()
     OmegaConf.register_resolver("uuid", lambda: UUID)
 
-    cli = SWaVCli(SwAV, FullSizeMiniImagenetDataModule, run=False, parser_kwargs={"parser_mode": "omegaconf"})
+    cli = SWaVCli(SwAV, FullSizeMiniImagenetDataModule, run=False, save_config_filename=str(UUID),
+                  save_config_overwrite=True,
+                  parser_kwargs={"parser_mode": "omegaconf"})
     args = cli.config["model"]
     # parser = ArgumentParser()
     #
