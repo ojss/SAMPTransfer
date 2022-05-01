@@ -58,41 +58,41 @@ model:
     crops_for_assign: ${crops_for_assign}
     gaussian_blur: ${gaussian_blur}
     jitter_strength: ${jitter_strength}
-    mpnn_opts:
-      _use: True
-      loss_cnn: True
-      scaling_ce: 1
-      task_adapt: False
-      temperature: 0.2
-      output_train_gnn: plain
-      graph_params:
-        sim_type: "correlation"
-        thresh: "no" #0
-        set_negative: "hard"
-      gnn_params:
-        pretrained_path: "no"
-        red: 1
-        cat: 0
-        every: 0
-        gnn:
-          num_layers: 1
-          aggregator: "add"
-          num_heads: 1
-          attention: "dot"
-          mlp: 1
-          dropout_mlp: 0.1
-          norm1: 1
-          norm2: 1
-          res1: 1
-          res2: 1
-          dropout_1: 0.1
-          dropout_2: 0.1
-          mult_attr: 0
-        classifier:
-          neck: 1
-          num_classes: 0
-          dropout_p: 0.4
-          use_batchnorm: 0
+  mpnn_opts:
+    _use: True
+    loss_cnn: True
+    scaling_ce: 1
+    task_adapt: False
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 1
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
 
 
 data:
