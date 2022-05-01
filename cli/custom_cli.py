@@ -5,7 +5,7 @@ from jsonargparse import lazy_instance
 from pytorch_lightning import LightningDataModule, LightningModule, Trainer
 from pytorch_lightning.utilities.cli import LightningCLI, SaveConfigCallback, LightningArgumentParser
 
-from bow.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import CNN_4Layer
 
 
 def add_slurm_args(parser: LightningArgumentParser):

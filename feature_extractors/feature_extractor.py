@@ -1,11 +1,13 @@
 from typing import Optional
 
 import math
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.models as models
 
-from . import bow_utils as utils
 import vision_transformer as vits
+from bow import bow_utils as utils
 
 
 class SequentialFeatureExtractorAbstractClass(nn.Module):
@@ -289,13 +291,34 @@ class ResNet(SequentialFeatureExtractorAbstractClass):
         self.num_channels = net.fc.in_features
 
 
-def conv3x3(in_channels, out_channels, ada_maxpool=False, **kwargs):
-    return nn.Sequential(
+class MultiPrototypes(nn.Module):
+    def __init__(self, output_dim, nmb_prototypes):
+        super().__init__()
+        self.nmb_heads = len(nmb_prototypes)
+        for i, k in enumerate(nmb_prototypes):
+            self.add_module("prototypes" + str(i), nn.Linear(output_dim, k, bias=False))
+
+    def forward(self, x):
+        out = []
+        for i in range(self.nmb_heads):
+            out.append(getattr(self, "prototypes" + str(i))(x))
+        return out
+
+
+def conv3x3(in_channels, out_channels, maxpool=True, ada_maxpool=False, **kwargs):
+    tmp = nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, **kwargs),
         nn.BatchNorm2d(out_channels),
         nn.ReLU(),
-        nn.MaxPool2d(2) if not ada_maxpool else nn.AdaptiveMaxPool2d(5)
+        # nn.MaxPool2d(2) if not ada_maxpool else nn.AdaptiveMaxPool2d(5)
     )
+    if maxpool and not ada_maxpool:
+        tmp.add_module("maxpool", nn.MaxPool2d(2))
+    elif maxpool and ada_maxpool:
+        tmp.add_module("ada_maxpool", nn.AdaptiveMaxPool2d(5))
+    elif not maxpool and not ada_maxpool:
+        pass
+    return tmp
 
 
 class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
@@ -332,10 +355,108 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
         super(CNN_4Layer, self).__init__(all_feat_names, feature_blocks)
         self.num_channels = out_channels
 
-    # def forward(self, inputs):
-    #     # embeddings = self.encoder(inputs.view(-1, *inputs.shape[-3:]))
-    #     # return embeddings.view(*inputs.shape[:-3], -1)
-    #     return self.encoder(inputs)
+
+class SWaV_CNN_4Layer(nn.Module):
+    def __init__(self, in_channels: int,
+                 out_channels=64, hidden_size=64, global_pooling=True,
+                 eval_mode=False, last_maxpool=False, ada_maxpool=False, normalize=True, output_dim=0, hidden_mlp=0,
+                 nmb_prototypes=0):
+        super(SWaV_CNN_4Layer, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.hidden_size = hidden_size
+        self.global_pool = global_pooling
+        self.eval_mode = eval_mode
+        self.padding = nn.ConstantPad2d(1, 0.0)
+
+        self.encoder = nn.Sequential(
+            conv3x3(in_channels, hidden_size),
+            conv3x3(hidden_size, hidden_size),
+            conv3x3(hidden_size, hidden_size),
+            conv3x3(hidden_size, out_channels, maxpool=last_maxpool, ada_maxpool=ada_maxpool)
+        )
+
+        if self.global_pool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        else:
+            self.avgpool = nn.Identity()
+        # normalize output features
+        self.l2norm = normalize
+
+        # projection head
+        if output_dim == 0:
+            self.projection_head = None
+        elif hidden_mlp == 0:
+            self.projection_head = nn.Linear(out_channels, output_dim)
+        else:
+            self.projection_head = nn.Sequential(
+                nn.Linear(out_channels, hidden_mlp),
+                nn.BatchNorm1d(hidden_mlp),
+                nn.ReLU(inplace=True),
+                nn.Linear(hidden_mlp, output_dim),
+            )
+
+        # prototype layer
+        self.prototypes = None
+        if isinstance(nmb_prototypes, list):
+            # can also get from pl_bolts but for the sake of future compat not doing that
+            self.prototypes = MultiPrototypes(output_dim, nmb_prototypes)
+        elif nmb_prototypes > 0:
+            self.prototypes = nn.Linear(output_dim, nmb_prototypes, bias=False)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward_backbone(self, x):
+        x = self.padding(x)
+        x = self.encoder(x)
+
+        if self.eval_mode:
+            return x
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        return x
+
+    def forward_head(self, x):
+        if self.projection_head is not None:
+            x = self.projection_head(x)
+
+        if self.l2norm:
+            x = F.normalize(x, dim=1, p=2)
+
+        if self.prototypes is not None:
+            return x, self.prototypes(x)
+        return x
+
+    def forward(self, inputs):
+        if not isinstance(inputs, list):
+            inputs = [inputs]
+
+        idx_crops = torch.cumsum(
+            torch.unique_consecutive(torch.tensor([inp.shape[-1] for inp in inputs]), return_counts=True)[1], 0,
+        )
+
+        start_idx = 0
+
+        for end_idx in idx_crops:
+            _out = torch.cat(inputs[start_idx: end_idx])
+
+            if "cuda" in str(self.encoder[0][0].weight.device):
+                _out = self.forward_backbone(_out.cuda(non_blocking=True))
+            else:
+                _out = self.forward_backbone(_out)
+
+            if start_idx == 0:
+                output = _out
+            else:
+                output = torch.cat([output, _out])
+            start_idx = end_idx
+
+        return self.forward_head(output)
 
 
 class ViT(nn.Module):
