@@ -167,6 +167,8 @@ class SwAV(LightningModule):
         self.softmax = nn.Softmax(dim=1)
 
     def setup(self, stage):
+        if self.trainer.limit_train_batches > 1:
+            self.train_iters_per_epoch = self.trainer.limit_train_batches
         if self.queue_length > 0:
             queue_folder = os.path.join(self.logger.log_dir, self.queue_path)
             if not os.path.exists(queue_folder):
