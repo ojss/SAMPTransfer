@@ -1,34 +1,10 @@
+name: ai
 channels:
   - conda-forge
-  - pytorch
-  - pyg
 dependencies:
-  - python=3.9
-  - pytorch-lightning=1.5.10
-  - matplotlib
-  - scikit-learn
-  - wandb
-  - fire
-  - opencv
-  - torchaudio
-  - torchvision
-  - pytorch=1.11.0
-  - cpuonly
-  - jsonargparse=4.3.1
-  - pyg
-  - h5py
-  - fire
-  - ordered-set
-  - pandas
-  - omegaconf
-  - Pillow
-  - plotly
-  - seaborn
-  - numpy
-  - cython
-  - colour
-  - torchmetrics
-  - pip
-  - submitit
-#  - pip:
-#      - torchmeta --install-option="--no-deps"
+  - hdf5
+  - libllvm11=11.1.0
+  - llvm=11.1.0
+  - llvm-tools=11.1.0
+  - llvmdev=11.1.0
+  - python=3.9.12

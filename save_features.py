@@ -73,25 +73,48 @@ def identity_transform(img_shape):
     return transforms.Compose([transforms.Resize(img_shape),
                                transforms.ToTensor()])
 
+def gnn_forward(model, gnn, device, feats):
+    edge_attr, edge_index, feats = model.graph_generator.get_graph(feats)
+    edge_attr = edge_attr.to(device)
+    edge_index = edge_index.to(device)
+    feats = model.gnn(feats, edge_index, edge_attr,
+                        gnn["hyper_parameters"]["mpnn_opts"]["output_train_gnn"])[1][0]
+    return feats
 
-def save_features(model, data_loader, outfile, dl2=None, gnn=None):
+def save_features(model, data_loader, outfile, prev_out=None, dl2=None, gnn=None):
+    if torch.cuda.is_available():
+        device = "cuda:0"
+    else:
+        device = "cpu"
     f = h5py.File(outfile, 'w')
     max_count = len(data_loader) * data_loader.batch_size
     all_labels = f.create_dataset('all_labels', (max_count,), dtype='i')
     all_feats = None
+    tmp = []
     count = 0
+    if gnn is not None and prev_out is not None:
+        for feats, y in prev_out:
+            feats = feats.flatten(1)
+            h = gnn_forward(model, gnn, device, feats)
+            if all_feats is None:
+                all_feats = f.create_dataset('all_feats', [max_count] + list(feats.size()[1:]), dtype='f')
+            all_feats[count:count + feats.size(0)] = feats.data.cpu().numpy()
+            all_labels[count:count + feats.size(0)] = y.cpu().numpy()
+            count = count + feats.size(0)
+        count_var = f.create_dataset('count', (1,), dtype='i')
+        count_var[0] = count
+
+        f.close()
+        return 
+
     for i, (x, y) in enumerate(data_loader):
         if i % 10 == 0:
             print('{:d}/{:d}'.format(i, len(data_loader)))
-        x = x.cuda()
+        x = x.to(device)
         x_var = Variable(x)
-        if gnn is not None:
-            feats = model.feature_extractor(x_var).flatten(1)
-            edge_attr, edge_index, feats = model.graph_generator.get_graph(feats)
-            feats = model.gnn(feats, edge_index.cuda(), edge_attr.cuda(),
-                              gnn["hyper_parameters"]["mpnn_opts"]["output_train_gnn"])[1][0]
-        else:
-            feats = model(x_var)
+        feats = model(x_var)
+        
+        tmp.append((feats, y))
 
         if all_feats is None:
             all_feats = f.create_dataset('all_feats', [max_count] + list(feats.size()[1:]), dtype='f')
@@ -103,6 +126,7 @@ def save_features(model, data_loader, outfile, dl2=None, gnn=None):
     count_var[0] = count
 
     f.close()
+    return tmp
 
 
 if __name__ == '__main__':

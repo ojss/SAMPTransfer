@@ -21,7 +21,7 @@ model:
   max_epochs: ${trainer.max_epochs}
   
   optim: adam
-  learning_rate: 4.8
+  learning_rate: 1e-3
   final_lr: 0.0048
   start_lr: 0.3
   
@@ -101,10 +101,11 @@ data:
   eval_support_shots: 5
   eval_query_shots: 15
   batch_size: 10
-  num_workers: 8
+  num_workers: 1
 
 trainer:
-  fast_dev_run: 1
+  fast_dev_run: 0
+  limit_train_batches: 100
   max_epochs: 800
   check_val_every_n_epoch: 10
   callbacks:
