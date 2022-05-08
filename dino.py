@@ -1,5 +1,7 @@
 import copy
 import sys
+import time
+import wandb
 from typing import Any
 
 import deepspeed
@@ -67,6 +69,7 @@ class DINO(pl.LightningModule):
         student_out = [self.forward(view) for view in views]
 
         loss = self.criterion(teacher_out, student_out, epoch=self.current_epoch)
+        self.log("loss", loss.item(), prog_bar=True, on_epoch=True, on_step=True)
         return loss
 
     def on_after_backward(self) -> None:
@@ -93,9 +96,11 @@ class DINO(pl.LightningModule):
 
 
 def cli_main():
-    cli = LightningCLI(DINO, run=False, parser_kwargs={"parser_mode": "omegaconf"})
+    cli = LightningCLI(DINO, run=False, parser_kwargs={"parser_mode": "omegaconf"}, save_config_overwrite=True)
     cli.trainer.fit(cli.model)
+    wandb.finish()
     if "jarviscloud" in sys.modules:
+        time.sleep(90) # sleep for 3 mins so wandb can finish up
         jarviscloud.pause()
 
 
