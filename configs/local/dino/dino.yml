@@ -2,7 +2,7 @@ seed_everything: 72
 model:
   data_path: ../data/miniimagenet_84/train
   batch_size: 4
-  num_workers: 1
+  num_workers: 0
 trainer:
   gpus: 0
   num_sanity_val_steps: 1

@@ -1,20 +1,18 @@
 import copy
 import sys
 import time
-import wandb
 from typing import Any
 
 import deepspeed
 import pytorch_lightning as pl
 import torch
-from torch import nn
+import torch.nn.functional as F
 import torchvision.datasets
-from lightly.data import DINOCollateFunction
-from lightly.data import LightlyDataset
+import wandb
+from lightly.data import DINOCollateFunction, LightlyDataset
 from lightly.loss import DINOLoss
 from lightly.models.modules import DINOProjectionHead
-from lightly.models.utils import deactivate_requires_grad
-from lightly.models.utils import update_momentum
+from lightly.models.utils import deactivate_requires_grad, update_momentum
 from pytorch_lightning.utilities.cli import LightningCLI
 from torch.utils.data import DataLoader
 
@@ -28,7 +26,7 @@ except ImportError as e:
 
 class DINO(pl.LightningModule):
 
-    def __init__(self, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool=False):
+    def __init__(self, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False):
         super(DINO, self).__init__()
         if adaptive_avg_pool:
             conv4 = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
@@ -68,6 +66,7 @@ class DINO(pl.LightningModule):
         update_momentum(self.student_head, self.teacher_head, m=.99)
         views, _, _ = batch
         views = [view.to(self.device) for view in views]
+        views = [F.pad(view, (16, 16, 16, 16), "constant") for view in views[2:]]
         global_views = views[:2]
         teacher_out = [self.forward_teacher(view) for view in global_views]
         student_out = [self.forward(view) for view in views]
@@ -84,14 +83,19 @@ class DINO(pl.LightningModule):
             optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=0.001)
         else:
             optim = torch.optim.Adam(self.parameters(), lr=0.001)
-        return optim
+        scheduler = {
+            "scheduler": torch.optim.lr_scheduler.StepLR(optim, step_size=15000, gamma=0.5),
+            "interval": "step",
+            "frequency": 1,
+        }
+        return [optim], [scheduler]
 
     def train_dataloader(self):
 
         miniimg = torchvision.datasets.ImageFolder(self.data_path)
         dataset = LightlyDataset.from_torch_dataset(miniimg)
 
-        collate_fn = DINOCollateFunction(global_crop_size=84, local_crop_size=80)
+        collate_fn = DINOCollateFunction(global_crop_size=84, local_crop_size=48)
 
         dataloader = DataLoader(dataset, batch_size=self.batch_size, collate_fn=collate_fn, shuffle=True,
                                 drop_last=True,
@@ -104,7 +108,7 @@ def cli_main():
     cli.trainer.fit(cli.model)
     wandb.finish()
     if "jarviscloud" in sys.modules:
-        time.sleep(90) # sleep for 3 mins so wandb can finish up
+        time.sleep(90)  # sleep for 3 mins so wandb can finish up
         jarviscloud.pause()
 
 
