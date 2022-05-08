@@ -1,4 +1,5 @@
 import copy
+import sys
 from typing import Any
 
 import deepspeed
@@ -15,6 +16,11 @@ from pytorch_lightning.utilities.cli import LightningCLI
 from torch.utils.data import DataLoader
 
 from feature_extractors.feature_extractor import CNN_4Layer
+
+try:
+    from jarviscloud import jarviscloud
+except ImportError as e:
+    pass
 
 
 class DINO(pl.LightningModule):
@@ -89,6 +95,8 @@ class DINO(pl.LightningModule):
 def cli_main():
     cli = LightningCLI(DINO, run=False, parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model)
+    if "jarviscloud" in sys.modules:
+        jarviscloud.pause()
 
 
 if __name__ == "__main__":
