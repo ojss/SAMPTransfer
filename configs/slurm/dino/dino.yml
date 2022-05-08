@@ -4,6 +4,7 @@ model:
   data_path: ../data/train
   batch_size: 64
   num_workers: 6
+  adaptive_avg_pool: True
 
 trainer:
   gpus: -1

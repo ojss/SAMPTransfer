@@ -7,6 +7,7 @@ from typing import Any
 import deepspeed
 import pytorch_lightning as pl
 import torch
+from torch import nn
 import torchvision.datasets
 from lightly.data import DINOCollateFunction
 from lightly.data import LightlyDataset
@@ -27,9 +28,12 @@ except ImportError as e:
 
 class DINO(pl.LightningModule):
 
-    def __init__(self, data_path: str, batch_size: int, num_workers: int):
+    def __init__(self, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool=False):
         super(DINO, self).__init__()
-        conv4 = CNN_4Layer(in_channels=3, global_pooling=False, )
+        if adaptive_avg_pool:
+            conv4 = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
+        else:
+            conv4 = CNN_4Layer(in_channels=3, global_pooling=False, )
         with torch.no_grad():
             input_dim = conv4(torch.rand(1, 3, 84, 84)).flatten(1).shape[-1]
 

@@ -325,7 +325,7 @@ def conv3x3(in_channels, out_channels, maxpool=True, ada_maxpool=False, **kwargs
 
 class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
     def __init__(self, in_channels: int, out_channels=64, hidden_size=64, global_pooling=True,
-                 graph_conv=False, ada_maxpool=False):
+                 graph_conv=False, final_maxpool=True, ada_maxpool=False):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_size = hidden_size
@@ -342,8 +342,7 @@ class CNN_4Layer(SequentialFeatureExtractorAbstractClass):
         all_feat_names.append('block3')
 
         feature_blocks.append(
-            conv3x3(hidden_size, out_channels) if not ada_maxpool else conv3x3(hidden_size, out_channels,
-                                                                               ada_maxpool=True))
+            conv3x3(hidden_size, out_channels, maxpool=final_maxpool, ada_maxpool=ada_maxpool))
         all_feat_names.append('block4')
 
         if global_pooling:
