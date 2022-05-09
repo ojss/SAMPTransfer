@@ -1,0 +1,36 @@
+# job_name: dino-${uuid:}
+seed_everything: 72
+model:
+  data_path: "/content/drive/MyDrive/mini-imagenet (1)/train"
+  batch_size: 64
+  num_workers: 6
+  adaptive_avg_pool: False
+
+trainer:
+  gpus: -1
+  fast_dev_run: False
+  max_epochs: 50
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: DINO
+      save_dir: wandb_logs
+      log_model: True
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./ckpts/
+        filename: "{epoch}-{loss_epoch:.2f}"
+        monitor: "loss_epoch"
+        save_top_k: 3
+        save_last: True
+        every_n_epochs: 1
+        mode: min
+    #    - class_path: pytorch_lightning.callbacks.EarlyStopping
+    #      init_args:
+    #        patience: 500
+    #        monitor: "train_loss_epoch"
+    #        mode: "min"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
