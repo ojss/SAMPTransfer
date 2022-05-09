@@ -26,11 +26,7 @@ wandb = "^0.12.16"
 matplotlib = "^3.5.2"
 seaborn = "^0.11.2"
 plotly = "^5.7.0"
-jupyter = "^1.0.0"
-ipython = "^8.3.0"
 opencv-python = "^4.5.5"
-jupyterlab = "^3.4.0"
-jupyter-contrib-nbextensions = "^0.5.1"
 h5py = "^3.6.0"
 deepspeed = "^0.6.4"
 einops = "^0.4.1"
@@ -40,6 +36,10 @@ torchinfo = "^1.6.5"
 lightly = "^1.2.14"
 
 [tool.poetry.dev-dependencies]
+jupyter = "^1.0.0"
+ipython = "^8.3.0"
+jupyterlab = "^3.4.0"
+jupyter-contrib-nbextensions = "^0.5.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
