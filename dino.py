@@ -72,7 +72,7 @@ class DINO(pl.LightningModule):
         student_out = [self.forward(view) for view in views]
 
         loss = self.criterion(teacher_out, student_out, epoch=self.current_epoch)
-        self.log("loss", loss.item(), prog_bar=True, on_epoch=True, on_step=True)
+        self.log("loss", loss.item(), prog_bar=True, on_epoch=True, on_step=True, batch_size=self.batch_size)
         return loss
 
     def on_after_backward(self) -> None:
