@@ -29,7 +29,6 @@ class DINO(pl.LightningModule):
 
     def __init__(self, arch: str, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False):
         super(DINO, self).__init__()
-        breakpoint()
         if arch == "conv4":
             if adaptive_avg_pool:
                 backbone = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)

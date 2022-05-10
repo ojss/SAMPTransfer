@@ -11,7 +11,7 @@
 #SBATCH --qos=medium
 
 # The default run (wall-clock) time is 1 minute
-#SBATCH --time=00-10:00:00
+#SBATCH --time=00-07:00:00
 
 # The default number of parallel tasks per job is 1
 #SBATCH --ntasks=1
