@@ -29,6 +29,7 @@ from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from utils.sup_finetuning import Classifier
 
 
 @torch.no_grad()
@@ -74,27 +75,6 @@ def expand_target(target, prediction):
         target = target.unsqueeze(1).repeat(1, num_crops, 1).view(-1, num_words)
 
     return target
-
-
-class Classifier(nn.Module):
-    def __init__(self, dim, n_way):
-        super(Classifier, self).__init__()
-
-        self.fc = nn.Linear(dim, n_way)
-
-    def forward(self, x):
-        x = self.fc(x)
-        return x
-
-    def _set_params(self, weight, bias):
-        state_dict = dict(weight=weight, bias=bias)
-        self.fc.load_state_dict(state_dict)
-
-    def init_params_from_prototypes(self, z_support, n_way, n_support):
-        z_support = z_support.contiguous()
-        z_proto = z_support.view(n_way, n_support, -1).mean(1)  # the shape of z is [n_data, n_dim]
-        # Interpretation of ProtoNet as linear layer (see Snell et al. (2017))
-        self._set_params(weight=2 * z_proto, bias=-torch.norm(z_proto, dim=-1) ** 2)
 
 
 # Cell
