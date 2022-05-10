@@ -1,3 +1,4 @@
+import copy
 import sys
 import time
 
@@ -15,7 +16,9 @@ from pytorch_lightning.utilities.cli import LightningCLI
 from torch import nn
 from torch.utils.data import DataLoader
 
+from dataloaders import get_episode_loader
 from feature_extractors.feature_extractor import CNN_4Layer
+from utils.sup_finetuning import supervised_finetuning as generic_sup_finetune
 
 try:
     from jarviscloud import jarviscloud
@@ -24,7 +27,9 @@ except ImportError as e:
 
 
 class SimSiam(pl.LightningModule):
-    def __init__(self, arch: str, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False,
+    def __init__(self, arch: str, data_path: str, fsl_data_path: str,
+                 batch_size: int, num_workers: int,
+                 adaptive_avg_pool: bool = False,
                  input_size: int = 224):
         super(SimSiam, self).__init__()
         if arch == "conv4":
@@ -39,9 +44,10 @@ class SimSiam(pl.LightningModule):
             in_dim = self.backbone(torch.randn(1, 3, 224, 224)).flatten(1).shape[-1]
         self.projection_head = SimSiamProjectionHead(in_dim, in_dim, 128)
         self.prediction_head = SimSiamPredictionHead(128, 64, 128)
-        self.criterion = NegativeCosineSimilarity
+        self.criterion = NegativeCosineSimilarity()
 
         self.data_path = data_path
+        self.fsl_data_path = fsl_data_path
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_size = input_size
@@ -85,6 +91,49 @@ class SimSiam(pl.LightningModule):
                                 num_workers=self.num_workers)
         return dataloader
 
+    def _shared_eval_step(self, batch, batch_idx):
+        loss = 0.
+        acc = 0.
+
+        original_enc_state = copy.deepcopy(self.backbone.state_dict())
+
+        loss, acc = generic_sup_finetune(self.backbone, episode=batch, device=self.device, inner_lr=1e-3,
+                                         total_epoch=15, freeze_backbone=True, finetune_batch_norm=False, n_way=5)
+        self.backbone.load_state_dict(original_enc_state)
+        return loss, acc
+
+    def validation_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+        self.log_dict({"val_loss": loss.item(), "val_acc": acc}, on_step=True, on_epoch=True)
+        return loss.item(), acc
+
+    def test_step(self, batch, batch_idx):
+        loss, acc = self._shared_eval_step(batch, batch_idx)
+        self.log_dict({"test_loss": loss.item(), "test_acc": acc}, on_step=True, on_epoch=True)
+        return loss.item(), acc
+
+    def test_dataloader(self):
+        dataloader_test = get_episode_loader("miniimagenet", self.fsl_data_path,
+                                             ways=5,
+                                             shots=5,
+                                             test_shots=15,
+                                             batch_size=1,
+                                             split='test',
+                                             shuffle=False,
+                                             num_workers=2)
+        return dataloader_test
+
+    def val_dataloader(self):
+        dataloader_val = get_episode_loader("miniimagenet", self.fsl_data_path,
+                                            ways=5,
+                                            shots=5,
+                                            test_shots=15,
+                                            batch_size=1,
+                                            split='val',
+                                            shuffle=False,
+                                            num_workers=2)
+        return dataloader_val
+
 
 def cli_main():
     cli = LightningCLI(SimSiam, run=False, parser_kwargs=dict(parser_mode="omegaconf"), save_config_overwrite=True)
@@ -92,4 +141,8 @@ def cli_main():
     wandb.finish()
     if "jarviscloud" in sys.modules:
         time.sleep(90)  # sleep for 3 mins so wandb can finish up
-    jarviscloud.pause()
+        jarviscloud.pause()
+
+
+if __name__ == "__main__":
+    cli_main()

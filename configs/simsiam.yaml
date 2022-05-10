@@ -1,0 +1,36 @@
+# job_name: dino-${uuid:}
+seed_everything: 72
+model:
+  arch: conv4
+  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/train
+  input_size: 84 # or can be 224
+  fsl_data_path: /home/nfs/oshirekar/unsupervised_ml/data/
+  batch_size: 64
+  num_workers: 6
+  adaptive_avg_pool: False
+
+trainer:
+  gpus: 0
+  num_sanity_val_steps: 1
+  fast_dev_run: 1
+  max_epochs: 50
+  check_val_every_n_epoch: 24
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: SimSiam
+      save_dir: wandb_logs
+      log_model: True
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./ckpts/
+        filename: "{epoch}-{loss_epoch:.2f}"
+        monitor: "loss_epoch"
+        save_top_k: 2
+        save_last: True
+        every_n_epochs: 1
+        mode: min
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
