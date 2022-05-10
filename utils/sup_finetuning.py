@@ -21,9 +21,10 @@ class Classifier(nn.Module):
         state_dict = dict(weight=weight, bias=bias)
         self.fc.load_state_dict(state_dict)
 
-    def init_params_from_prototypes(self, z_support, n_way, n_support):
+    def init_params_from_prototypes(self, z_support, n_way, n_support, z_proto=None):
         z_support = z_support.contiguous()
-        z_proto = z_support.view(n_way, n_support, -1).mean(1)  # the shape of z is [n_data, n_dim]
+        z_proto = z_support.view(n_way, n_support, -1).mean(
+            1) if z_proto is None else z_proto  # the shape of z is [n_data, n_dim]
         # Interpretation of ProtoNet as linear layer (see Snell et al. (2017))
         self._set_params(weight=2 * z_proto, bias=-torch.norm(z_proto, dim=-1) ** 2)
 
