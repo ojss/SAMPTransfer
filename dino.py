@@ -14,6 +14,7 @@ from lightly.loss import DINOLoss
 from lightly.models.modules import DINOProjectionHead
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 from pytorch_lightning.utilities.cli import LightningCLI
+from torch import nn
 from torch.utils.data import DataLoader
 
 from feature_extractors.feature_extractor import CNN_4Layer
@@ -26,18 +27,24 @@ except ImportError as e:
 
 class DINO(pl.LightningModule):
 
-    def __init__(self, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False):
+    def __init__(self, arch: str, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False):
         super(DINO, self).__init__()
-        if adaptive_avg_pool:
-            conv4 = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
-        else:
-            conv4 = CNN_4Layer(in_channels=3, global_pooling=False, )
-        with torch.no_grad():
-            input_dim = conv4(torch.rand(1, 3, 84, 84)).flatten(1).shape[-1]
+        breakpoint()
+        if arch == "conv4":
+            if adaptive_avg_pool:
+                backbone = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
+            else:
+                backbone = CNN_4Layer(in_channels=3, global_pooling=False, )
+        elif arch in torchvision.models.__dict__.keys():
+            net = torchvision.models.__dict__[arch](pretrained=False)
+            backbone = nn.Sequential(*list(net.children())[:-1])
 
-        self.student_backbone = conv4
+        with torch.no_grad():
+            input_dim = backbone(torch.rand(1, 3, 84, 84)).flatten(1).shape[-1]
+
+        self.student_backbone = backbone
         self.student_head = DINOProjectionHead(input_dim, input_dim, 64, 2048, freeze_last_layer=1)
-        self.teacher_backbone = copy.deepcopy(conv4)
+        self.teacher_backbone = copy.deepcopy(backbone)
         self.teacher_head = DINOProjectionHead(input_dim, input_dim, 64, 2048)
 
         deactivate_requires_grad(self.teacher_head)
@@ -66,7 +73,7 @@ class DINO(pl.LightningModule):
         update_momentum(self.student_head, self.teacher_head, m=.99)
         views, _, _ = batch
         views = [view.to(self.device) for view in views]
-        views = [F.pad(view, (16, 16, 16, 16), "constant") for view in views[2:]]
+        # views = [F.pad(view, (16, 16, 16, 16), "constant") for view in views[2:]]
         global_views = views[:2]
         teacher_out = [self.forward_teacher(view) for view in global_views]
         student_out = [self.forward(view) for view in views]
@@ -95,7 +102,7 @@ class DINO(pl.LightningModule):
         miniimg = torchvision.datasets.ImageFolder(self.data_path)
         dataset = LightlyDataset.from_torch_dataset(miniimg)
 
-        collate_fn = DINOCollateFunction(global_crop_size=84, local_crop_size=48)
+        collate_fn = DINOCollateFunction(global_crop_size=224, local_crop_size=96)
 
         dataloader = DataLoader(dataset, batch_size=self.batch_size, collate_fn=collate_fn, shuffle=True,
                                 drop_last=True,

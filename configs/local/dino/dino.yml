@@ -1,5 +1,6 @@
 seed_everything: 72
 model:
+  arch: regnet_x_400mf
   data_path: ../data/miniimagenet_84/train
   batch_size: 4
   num_workers: 0

@@ -34,6 +34,7 @@ ordered-set = "^4.1.0"
 timm = "^0.5.4"
 torchinfo = "^1.6.5"
 lightly = "^1.2.14"
+submitit = "^1.4.2"
 
 [tool.poetry.dev-dependencies]
 jupyter = "^1.0.0"
