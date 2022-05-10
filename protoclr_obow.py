@@ -1,10 +1,10 @@
 __all__ = ['Classifier', 'PCLROBoW']
 
 import copy
+import math
 import uuid
 from typing import Optional, Iterable, Union
 
-import math
 import numpy as np
 import pl_bolts.optimizers
 import pytorch_lightning as pl
@@ -22,9 +22,9 @@ import vicreg.utils as vic_utils
 from bow.bow_extractor import BoWExtractorMultipleLevels
 from bow.bowpredictor import BoWPredictor
 from bow.classification import PredictionHead
-from feature_extractors.feature_extractor import CNN_4Layer
 from cli.custom_cli import MyCLI
 from dataloaders import UnlabelledDataModule
+from feature_extractors.feature_extractor import CNN_4Layer
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
@@ -361,7 +361,10 @@ class PCLROBoW(pl.LightningModule):
         if self.optim == 'sgd':
             opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay, nesterov=False)
         elif self.optim == 'adam':
-            opt = FusedAdam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+            if torch.cuda.is_available():
+                opt = FusedAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            else:
+                opt = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         elif self.optim == 'radam':
             opt = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
@@ -571,13 +574,19 @@ class PCLROBoW(pl.LightningModule):
 
         if self.mpnn_opts["_use"]:
             self.eval()
+            proto = None
             if self.mpnn_opts["task_adapt"]:
-                _, _, z = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_b_i]))
-                z = z[0]
-                z_a_i = z[:support_size, :]
+                z_support = self.feature_extractor(x_a_i).flatten(1)
+                z_query = self.feature_extractor(x_b_i).flatten(1)
+                nmb_proto = n_way
+                z_proto = z_support.view(nmb_proto, n_support, -1).mean(1)
+                combined = torch.cat([z_proto, z_query])
+                edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
+                _, (combined,) = self.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+                proto, query = combined.split([nmb_proto, len(z_query)])  # split based on number of prototypes
+                z_a_i = z_support
             else:
-                _, _, z_a_i = self.mpnn_shared_step(x_a_i, y_a_i)
-                z_a_i = z_a_i[0]
+                _, _, (z_a_i,) = self.mpnn_shared_step(x_a_i, y_a_i)
             self.train()
         else:
             encoder.eval()
@@ -593,7 +602,7 @@ class PCLROBoW(pl.LightningModule):
         loss_fn = nn.CrossEntropyLoss().to(device)
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
-            classifier.init_params_from_prototypes(z_a_i, n_way, n_support)
+            classifier.init_params_from_prototypes(z_a_i, n_way, n_support, z_proto=proto)
         classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
@@ -627,8 +636,8 @@ class PCLROBoW(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
                 #####################################
                 if self.mpnn_opts["_use"]:
-                    _, _, output = self.mpnn_shared_step(z_batch, y_batch)
-                    output = output[0]
+                    # TODO: can task adaptation be used here?
+                    _, _, (output,) = self.mpnn_shared_step(z_batch, y_batch)
                 else:
                     output = encoder(z_batch).flatten(1)
 
@@ -646,14 +655,23 @@ class PCLROBoW(pl.LightningModule):
         self.eval()
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
-
         if self.mpnn_opts["_use"]:
             if self.mpnn_opts["task_adapt"]:
-                _, _, output = self.mpnn_shared_step(torch.cat([x_a_i, x_b_i]), torch.cat([y_a_i, y_query]))
-                output = output[0][support_size:, :]
+                # proto level feature sharing
+                z_support = self.feature_extractor(x_a_i)
+                z_proto = z_support.view(nmb_proto, n_support, -1).mean(1)
+                z_query = self.feature_extractor(x_b_i).flatten(1)
+                z_support = z_support.flatten(1)
+                combined = torch.cat([z_proto, z_query])
+                edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
+                _, (combined,) = self.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+                proto, query = combined.split([nmb_proto, len(z_query)])
+                output = query
             else:
-                _, _, output = self.mpnn_shared_step(x_b_i, y_query)
-                output = output[0]
+                # instance level feature sharing
+                combined = torch.cat([x_a_i, x_b_i])
+                _, _, (combined,) = self.mpnn_shared_step(combined, y_query)
+                _, output = combined.split([n_support * n_way, len(x_b_i)])
         else:
             output = encoder(x_b_i).flatten(1)
 
@@ -662,7 +680,7 @@ class PCLROBoW(pl.LightningModule):
         loss = F.cross_entropy(scores, y_query, reduction='mean')
         _, predictions = torch.max(scores, dim=1)
         # acc = torch.mean(predictions.eq(y_query).float())
-        acc = accuracy(predictions, y_query)
+        acc = accuracy(scores, y_query)
         return loss, acc.item()
 
     def std_proto_form(self, batch, batch_idx):

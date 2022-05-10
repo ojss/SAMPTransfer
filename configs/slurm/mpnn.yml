@@ -32,7 +32,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    task_adapt: False
+    task_adapt: True
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -73,10 +73,12 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: feature_extractors.feature_extractor.ResNet
+    class_path: feature_extractors.feature_extractor.CNN_4Layer
     init_args:
-      arch: resnet18
-      global_pooling: True
+      global_pooling: False
+      in_channels: 3
+      final_maxpool: True
+      ada_maxpool: False
 trainer:
   gpus: -1
   num_sanity_val_steps: 2

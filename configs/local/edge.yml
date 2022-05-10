@@ -15,11 +15,12 @@ model:
   clr_loss: False
   clr_on_bow: False
   mpnn_loss_fn: ce
+  mpnn_dev: cpu
   mpnn_opts:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    task_adapt: False
+    task_adapt: True
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -60,15 +61,16 @@ model:
     kappa: 5
   alpha: 0.99
   feature_extractor:
-    class_path: bow.feature_extractor.ViT
+    class_path: feature_extractors.feature_extractor.CNN_4Layer
     init_args:
-      arch: vit_micro
-      patch_size: 16
-      num_channels: 3
+      global_pooling: False
+      in_channels: 3
+      final_maxpool: True
+      ada_maxpool: False
 trainer:
-  gpus: -1
+  gpus: 0
   #  gradient_clip_val: 0.5
-  num_sanity_val_steps: 0
+  num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 1500
   limit_train_batches: 100
