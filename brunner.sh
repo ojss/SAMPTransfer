@@ -40,4 +40,4 @@ echo "$1"
 echo "With config:"
 echo "$2"
 source activate /home/nfs/oshirekar/unsupervised_ml/ai2
-python "$1" --config "$2"
+srun python "$1" --config "$2"
