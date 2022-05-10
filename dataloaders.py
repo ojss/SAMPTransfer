@@ -102,7 +102,7 @@ class ULDS(ImageFolder):
     def __init__(self, datapath, split, transform=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None,
                  no_aug_support=False, no_aug_query=False, img_size_orig=(224, 224), img_size_crop=(84, 84)):
-        super(ULDS, self).__init__(datapath)
+        super(ULDS, self).__init__(datapath + f"/{split}")
         self.n_support = n_support
         self.n_query = n_query
         self.split = split
