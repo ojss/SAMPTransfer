@@ -114,6 +114,7 @@ class PCLROBoW(pl.LightningModule):
                  clr_on_bow: bool,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
+                 mpnn_dev: str,
                  vicreg_opts: dict,
                  img_orig_size: Iterable,
                  optim: str = 'adam',
@@ -229,8 +230,8 @@ class PCLROBoW(pl.LightningModule):
         if mpnn_opts["_use"]:
             _, in_dim = self.feature_extractor(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
             self.dim = in_dim
-            self.gnn = GNNReID(self.device, mpnn_opts["gnn_params"], in_dim).to(self.device)
-            self.graph_generator = GraphGenerator(self.device, **mpnn_opts["graph_params"])
+            self.gnn = GNNReID(mpnn_dev, mpnn_opts["gnn_params"], in_dim).to(self.device)
+            self.graph_generator = GraphGenerator(mpnn_dev, **mpnn_opts["graph_params"])
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
