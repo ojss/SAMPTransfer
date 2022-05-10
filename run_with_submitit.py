@@ -14,12 +14,21 @@ OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
 
 
 def make_conf_file_copy(path):
+    """
+     for logging purposes and to prevent conflicts with multiple concurrent runs
+    :param path:
+    :return: Path
+    """
     fd, tmp_path = tempfile.mkstemp()
     shutil.copy2(path, tmp_path)
     return tmp_path
 
 
 def parse_args():
+    """
+    Loads and returns a yaml file
+    :return: dict, Path
+    """
     # TODO make this nicer somehow
     path = sys.argv[2]
     tmp_path = make_conf_file_copy(path)
