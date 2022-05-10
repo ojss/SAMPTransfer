@@ -33,12 +33,11 @@
 module use /opt/insy/modulefiles
 
 module load cuda/11.3
-module load cudnn/11.2-8.1.1.33
 module load miniconda/3.9
 
 echo "Running Algo:"
 echo "$1"
 echo "With config:"
 echo "$2"
-
+source activate /home/nfs/oshirekar/unsupervised_ml/ai2
 python "$1" --config "$2"
