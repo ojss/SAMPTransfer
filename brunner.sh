@@ -39,5 +39,8 @@ echo "Running Algo:"
 echo "$1"
 echo "With config:"
 echo "$2"
+echo "Additional args:"
+echo "${@:3}"
 source activate /home/nfs/oshirekar/unsupervised_ml/ai2
-srun python "$1" --config "$2"
+# send all remaining arguments
+srun python "$1" --config "$2" "${@:3}"
