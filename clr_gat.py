@@ -19,7 +19,6 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 from dataloaders import UnlabelledDataModule
-from feature_extractors.feature_extractor import CNN_4Layer
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
@@ -160,20 +159,6 @@ class CLRGAT(pl.LightningModule):
         preds, z = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
 
         return preds, z_orig, z
-
-    @torch.enable_grad()
-    def _clr_on_bow_forward(self, x_support, y_support, x_query, y_query, ways):
-        # x_query = [x_query]
-        # Compute BoW representations for all images
-        bow_repr, z = self.generate_bow_targets(torch.cat([x_support, x_query]))
-        z_supp_bow = bow_repr[0][:ways * self.n_support, ...].unsqueeze(0)
-        z_query_bow = bow_repr[0][ways * self.n_support:, ...].unsqueeze(0)
-        if self.n_support == 1:
-            z_proto = z_supp_bow
-        else:
-            z_proto = get_prototypes(z_supp_bow, y_support, ways)
-        loss, acc = prototypical_loss(z_proto, z_query_bow, y_query, distance=self.distance)
-        return loss, acc, bow_repr[0]
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
@@ -472,34 +457,6 @@ class CLRGAT(pl.LightningModule):
             logger=True,
         )
         return loss.item(), acc
-
-    def bow_opts_converter(self, bow_extractor_opts, bow_levels, num_channels):
-        model_opts = {}
-        bow_extractor_opts = bow_extractor_opts
-        num_words = bow_extractor_opts["num_words"]
-        inv_delta = bow_extractor_opts["inv_delta"]
-        bow_levels = bow_levels
-        num_bow_levels = len(bow_levels)
-        if not isinstance(inv_delta, (list, tuple)):
-            inv_delta = [inv_delta for _ in range(num_bow_levels)]
-        if not isinstance(num_words, (list, tuple)):
-            num_words = [num_words for _ in range(num_bow_levels)]
-
-        bow_extractor_opts_list = []
-        for i in range(num_bow_levels):
-            bow_extr_this = copy.deepcopy(bow_extractor_opts)
-            if isinstance(bow_extr_this["inv_delta"], (list, tuple)):
-                bow_extr_this["inv_delta"] = bow_extr_this["inv_delta"][i]
-            if isinstance(bow_extr_this["num_words"], (list, tuple)):
-                bow_extr_this["num_words"] = bow_extr_this["num_words"][i]
-            bow_extr_this["num_channels"] = num_channels if isinstance(self.backbone,
-                                                                       CNN_4Layer) else num_channels // (
-                    2 ** (num_bow_levels - 1 - i))
-            bow_extractor_opts_list.append(bow_extr_this)
-
-        model_opts["bow_extractor_opts_list"] = bow_extractor_opts_list
-
-        return model_opts
 
 
 def cli_main():
