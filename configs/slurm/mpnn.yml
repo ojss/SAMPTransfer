@@ -1,4 +1,3 @@
-job_name: mpnn_clr-${uuid:}
 seed_everything: 72
 slurm:
   nodes: 1
@@ -17,22 +16,23 @@ model:
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
+  sup_finetune: True
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
-  alpha_cosine: False
-  bow_clr: False
-  clr_loss: False
-  clr_on_bow: False
+  img_orig_size: ${data.img_size_orig}
+  batch_size: ${data.batch_size}
+  n_support: ${data.n_support}
+  n_query: ${data.n_query}
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    task_adapt: True
+    adapt: task
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -47,7 +47,7 @@ model:
       gnn:
         num_layers: 1
         aggregator: "add"
-        num_heads: 8
+        num_heads: 2
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -63,15 +63,6 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  vicreg_opts:
-    use_vicreg: False
-  bow_levels: [ "block3" ]
-  bow_extractor_opts:
-    inv_delta: 10
-    num_words: 8192
-  bow_predictor_opts:
-    kappa: 5
-  alpha: 0.99
   feature_extractor:
     class_path: feature_extractors.feature_extractor.CNN_4Layer
     init_args:
@@ -83,15 +74,15 @@ trainer:
   gpus: -1
   num_sanity_val_steps: 2
   fast_dev_run: False
-  max_epochs: 2500
+  max_epochs: 1500
   check_val_every_n_epoch: 10
-  min_epochs: 1000
   limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
+      name: ${oc.env:SLURM_JOB_ID}
       project: PCLR-OboW
       save_dir: wandb_logs
       log_model: True
@@ -101,7 +92,7 @@ trainer:
         max_depth: 3
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./ckpts/${job_name}
+        dirpath: ./ckpts/mpnn/${oc.env:SLURM_JOB_ID}
         filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
         monitor: "val_accuracy"
         save_last: True
