@@ -267,7 +267,10 @@ class CLRGAT(pl.LightningModule):
             proto = z_proto
             z_a_i = z_support
         elif self.mpnn_opts["adapt"] == "instance":
-            _, _, (z_a_i,) = self.forward(x_a_i, y_a_i)
+            # TODO: change instance to include both x_a_i and x_b_i
+            combined = torch.cat([x_a_i, x_b_i])
+            _, _, (combined,) = self.forward(combined)
+            z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
         else:
             z_a_i = self.backbone(x_a_i).flatten(1)
         self.train()
@@ -344,6 +347,10 @@ class CLRGAT(pl.LightningModule):
             proto, query = combined.split([nmb_proto, len(z_query)])
             output = query
         # cannot do proto adapt here
+        elif self.mpnn_opts["adapt"] == "instance":
+            combined = torch.cat([x_a_i, x_b_i])
+            _, _, (combined,) = self.forward(combined)
+            _, output = combined.split([len(x_a_i), len(x_b_i)])
         else:
             output = self.backbone(x_b_i).flatten(1)
 
