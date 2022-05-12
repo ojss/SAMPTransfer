@@ -317,7 +317,7 @@ class CLRGAT(pl.LightningModule):
                 if self.mpnn_opts["adapt"] in ["task", "proto_only", "instance"]:
                     _, _, (output,) = self.forward(z_batch, y_batch)
                 else:
-                    output = self.backbone(z_batch)
+                    output = self.backbone(z_batch).flatten(1)
 
                 output = classifier(output)
                 loss = loss_fn(output, y_batch)
