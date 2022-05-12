@@ -1,12 +1,11 @@
 import copy
 import sys
 import time
-from typing import Any
+from typing import Any, Tuple
 
 import deepspeed
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
 import torchvision.datasets
 import wandb
 from lightly.data import DINOCollateFunction, LightlyDataset
@@ -18,6 +17,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from feature_extractors.feature_extractor import CNN_4Layer
+from graph.gnn_base import GNNReID
+from graph.graph_generator import GraphGenerator
 
 try:
     from jarviscloud import jarviscloud
@@ -25,26 +26,47 @@ except ImportError as e:
     pass
 
 
+class GNN(nn.Module):
+    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_opts: dict, img_orig_size: Tuple):
+        super(GNN, self).__init__()
+        self.backbone = backbone
+        self.emb_dim = emb_dim
+        self.mpnn_opts = mpnn_opts
+        mpnn_dev = mpnn_opts["mpnn_dev"]
+        self.gnn = GNNReID(mpnn_dev, mpnn_opts["gnn_params"], emb_dim)
+        self.graph_generator = GraphGenerator(mpnn_dev, **mpnn_opts["graph_params"])
+
+    def forward(self, x):
+        z = self.backbone(x).flatten(1)
+        edge_attr, edge_index, z = self.graph_generator.get_graph(z)
+        _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        return z
+
+
 class DINO(pl.LightningModule):
 
-    def __init__(self, arch: str, data_path: str, batch_size: int, num_workers: int, adaptive_avg_pool: bool = False):
+    def __init__(self, arch: str, data_path: str, batch_size: int, num_workers: int,
+                 mpnn_opts: dict,
+                 img_orig_size: Tuple = (224, 224),
+                 adaptive_avg_pool: bool = False):
         super(DINO, self).__init__()
         if arch == "conv4":
             if adaptive_avg_pool:
                 backbone = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
             else:
-                backbone = CNN_4Layer(in_channels=3, global_pooling=False, )
+                backbone = CNN_4Layer(in_channels=3, global_pooling=False, final_maxpool=True, ada_maxpool=True)
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
-
         with torch.no_grad():
-            input_dim = backbone(torch.rand(1, 3, 84, 84)).flatten(1).shape[-1]
+            emb_dim = backbone(torch.rand(1, 3, *img_orig_size)).flatten(1).shape[-1]
+        if mpnn_opts["_use"]:
+            backbone = GNN(backbone, emb_dim, mpnn_opts, img_orig_size)
 
         self.student_backbone = backbone
-        self.student_head = DINOProjectionHead(input_dim, input_dim, 64, 2048, freeze_last_layer=1)
+        self.student_head = DINOProjectionHead(emb_dim, emb_dim, 64, 2048, freeze_last_layer=1)
         self.teacher_backbone = copy.deepcopy(backbone)
-        self.teacher_head = DINOProjectionHead(input_dim, input_dim, 64, 2048)
+        self.teacher_head = DINOProjectionHead(emb_dim, emb_dim, 64, 2048)
 
         deactivate_requires_grad(self.teacher_head)
         deactivate_requires_grad(self.teacher_backbone)

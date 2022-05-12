@@ -1,12 +1,46 @@
-# job_name: dino-${uuid:}
 seed_everything: 72
 model:
-  arch: regnet_y_400mf
+  arch: conv4
   data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/train
+  img_orig_size: [ 224, 224 ]
   batch_size: 64
   num_workers: 6
   adaptive_avg_pool: True
-
+  mpnn_opts:
+    _use: True
+    mpnn_dev: cuda
+    scaling_ce: 1
+    adapt: task
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 1
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
 trainer:
   gpus: -1
   fast_dev_run: False
@@ -15,12 +49,13 @@ trainer:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
       project: DINO
+      name: ${oc.env:SLURM_JOB_ID}
       save_dir: wandb_logs
       log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./ckpts/
+        dirpath: ./ckpts/dino/${oc.env:SLURM_JOB_ID}
         filename: "{epoch}-{loss_epoch:.2f}"
         monitor: "loss_epoch"
         save_top_k: 2
