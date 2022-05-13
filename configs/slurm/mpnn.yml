@@ -16,7 +16,8 @@ model:
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  sup_finetune: True
+  sup_finetune: proto_maml # [prototune, std_proto, proto_maml]
+  sup_finetune_epochs: 5 # 15 for prototune
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000

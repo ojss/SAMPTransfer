@@ -2,7 +2,7 @@ __all__ = ['CLRGAT']
 
 import copy
 import uuid
-from typing import Optional, Iterable, Union
+from typing import Optional, Iterable, Union, Tuple
 
 import einops
 import numpy as np
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from deepspeed.ops.adam import FusedAdam
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
+from pytorch_metric_learning import losses
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
@@ -47,7 +48,6 @@ class CLRGAT(pl.LightningModule):
                  warmup_epochs=10,
                  warmup_start_lr=1e-3,
                  eta_min=1e-5,
-                 inner_lr=1e-3,
                  distance='euclidean',
                  mode='trainval',
                  eval_ways=5,
@@ -75,7 +75,6 @@ class CLRGAT(pl.LightningModule):
         self.eta_min = eta_min
         self.lr_decay_rate = lr_decay_rate
         self.lr_decay_step = lr_decay_step
-        self.inner_lr = inner_lr
 
         # PCLR Supfinetune
         self.mode = mode
@@ -151,7 +150,13 @@ class CLRGAT(pl.LightningModule):
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
-    def forward(self, x, y=None):
+    def forward(self, x, y=None) -> Tuple[torch.Tensor, torch.Tensor, Iterable]:
+        """
+
+        :param x: torch.Tensor
+        :param y: torch.Tensor
+        :return: Tuple(preds, z_cnn, z)
+        """
         z = self.backbone(x)
         z_orig = z.clone().flatten(1)
         z = z.flatten(1)
@@ -223,9 +228,9 @@ class CLRGAT(pl.LightningModule):
                 "embeddings": z.detach()}  # accuracy return as 0 by default if CLR loss not used
 
     @torch.enable_grad()
-    def supervised_finetuning(self, episode, device='cpu', proto_init=True,
-                              freeze_backbone=False, finetune_batch_norm=False,
-                              inner_lr=0.001, total_epoch=15, n_way=5):
+    def prototune(self, episode, device='cpu', proto_init=True,
+                  freeze_backbone=False, finetune_batch_norm=False,
+                  inner_lr=0.001, total_epoch=15, n_way=5):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -310,6 +315,7 @@ class CLRGAT(pl.LightningModule):
                     delta_opt.zero_grad()
 
                 #####################################
+                # breakpoint()
                 selected_id = torch.from_numpy(
                     rand_id[j: min(j + batch_size, support_size)]).to(device)
 
@@ -353,14 +359,69 @@ class CLRGAT(pl.LightningModule):
             _, output = combined.split([len(x_a_i), len(x_b_i)])
         else:
             output = self.backbone(x_b_i).flatten(1)
-
+        breakpoint()
         scores = classifier(output)
 
         loss = F.cross_entropy(scores, y_query, reduction='mean')
         _, predictions = torch.max(scores, dim=1)
         # acc = torch.mean(predictions.eq(y_query).float())
-        acc = accuracy(scores, y_query)
+        acc = accuracy(predictions, y_query)
         return loss, acc.item()
+
+    @torch.enable_grad()
+    def proto_maml(self, batch, batch_idx):
+        x_support = batch['train'][0][0]  # only take data & only first batch
+        x_support = x_support.to(self.device)
+        x_support_var = Variable(x_support)
+        x_query = batch['test'][0][0]  # only take data & only first batch
+        x_query = x_query.to(self.device)
+        x_query_var = Variable(x_query)
+        n_support = x_support.shape[0] // self.eval_ways
+        n_query = x_query.shape[0] // self.eval_ways
+
+        batch_size = self.eval_ways
+        support_size = self.eval_ways * n_support
+        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
+        self.eval()
+        _, _, (z_supp,) = self.forward(x_support_var)
+        # z_proto = get_prototypes(z_supp, y_supp, self.eval_ways)
+        classifier = Classifier(z_supp.shape[-1], self.eval_ways)
+        classifier.init_params_from_prototypes(z_support=z_supp, n_way=self.eval_ways, n_support=n_support)
+        classifier.to(self.device)
+        self.train()
+        classifier.train()
+        ce_loss = nn.CrossEntropyLoss().to(self.device)
+        sup_con_loss = losses.SupConLoss()
+        if not self.ft_freeze_backbone:
+            # Only freeze the CNN backbone
+            self.backbone.requires_grad_(False)
+            self.gnn.requires_grad_(True)
+            # TODO: should I use another projector layer here instead of touching the GAT?
+        parameters = list(filter(lambda p: p.requires_grad, self.gnn.parameters())) + list(classifier.parameters())
+        opt = torch.optim.Adam(parameters, lr=self.lr, weight_decay=self.weight_decay)
+        for _ in range(self.sup_finetune_epochs):
+            opt.zero_grad()
+            _, _, (outputs,) = self.forward(x_support_var)
+            preds = classifier(outputs)
+            loss1 = ce_loss(preds, y_supp)
+            loss2 = sup_con_loss(outputs, y_supp)
+            loss = loss1 + loss2
+            loss.backward()
+            opt.step()
+        breakpoint()
+        self.eval()
+        classifier.eval()
+        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
+        combined = torch.cat([x_support_var, x_query_var])
+        # combined = x_query_var
+        _, _, (z,) = self.forward(combined)
+        _, z_query = z.split([len(x_support), len(x_query)])
+        # z_query = z
+        scores = classifier(z_query)
+        loss = F.cross_entropy(scores, y_query, reduction="mean")
+        _, preds = torch.max(scores, dim=1)
+        acc = accuracy(preds, y_query)
+        return loss, acc
 
     def std_proto_form(self, batch, batch_idx):
         x_support = batch["train"][0]
@@ -419,8 +480,8 @@ class CLRGAT(pl.LightningModule):
 
         original_encoder_state = copy.deepcopy(self.state_dict())
 
-        if self.sup_finetune:
-            loss, acc = self.supervised_finetuning(
+        if self.sup_finetune == "prototune":
+            loss, acc = self.prototune(
                 episode=batch,
                 inner_lr=self.sup_finetune_lr,
                 total_epoch=self.sup_finetune_epochs,
@@ -429,8 +490,9 @@ class CLRGAT(pl.LightningModule):
                 device=self.device,
                 n_way=self.eval_ways, )
             self.load_state_dict(original_encoder_state)
-
-        elif not self.sup_finetune:
+        elif self.sup_finetune == "proto_maml":
+            loss, acc = self.proto_maml(batch, batch_idx)
+        elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = self.std_proto_form(batch, batch_idx)
         return loss, acc

@@ -4,7 +4,8 @@ model:
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  sup_finetune: True
+  sup_finetune: proto_maml # [prototune, std_proto, proto_maml]
+  sup_finetune_epochs: 5
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -20,7 +21,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: task
+    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
