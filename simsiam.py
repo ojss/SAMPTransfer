@@ -17,7 +17,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from dataloaders import get_episode_loader
-from feature_extractors.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import create_model
 from utils.sup_finetuning import supervised_finetuning as generic_sup_finetune
 
 try:
@@ -28,15 +28,12 @@ except ImportError as e:
 
 class SimSiam(pl.LightningModule):
     def __init__(self, arch: str, data_path: str, fsl_data_path: str,
-                 batch_size: int, num_workers: int,
-                 adaptive_avg_pool: bool = False,
+                 batch_size: int, num_workers: int, lr: float,
                  input_size: int = 224):
         super(SimSiam, self).__init__()
         if arch == "conv4":
-            if adaptive_avg_pool:
-                self.backbone = CNN_4Layer(in_channels=3, global_pooling=True, final_maxpool=False, ada_maxpool=False)
-            else:
-                self.backbone = CNN_4Layer(in_channels=3, global_pooling=False, )
+            self.backbone = create_model(
+                dict(in_planes=3, out_planes=[96, 128, 256, 512], num_stages=4, average_end=True))
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             self.backbone = nn.Sequential(*list(net.children())[:-1])
@@ -45,6 +42,7 @@ class SimSiam(pl.LightningModule):
         self.projection_head = SimSiamProjectionHead(in_dim, in_dim, 128)
         self.prediction_head = SimSiamPredictionHead(128, 64, 128)
         self.criterion = NegativeCosineSimilarity()
+        self.lr = lr
 
         self.data_path = data_path
         self.fsl_data_path = fsl_data_path
@@ -69,14 +67,10 @@ class SimSiam(pl.LightningModule):
 
     def configure_optimizers(self):
         if torch.cuda.is_available():
-            optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=0.06)
+            optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=self.lr)
         else:
-            optim = torch.optim.Adam(self.parameters(), lr=0.06)
-        scheduler = {
-            "scheduler": torch.optim.lr_scheduler.StepLR(optim, step_size=15000, gamma=0.5),
-            "interval": "step",
-            "frequency": 1,
-        }
+            optim = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
         return [optim], [scheduler]
 
     def train_dataloader(self):

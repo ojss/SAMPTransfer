@@ -64,7 +64,7 @@ class SwaV(pl.LightningModule):
         high_resolution = multi_crop_features[:2]
         low_resolution = multi_crop_features[2:]
         loss = self.criterion(high_resolution, low_resolution)
-        self.log("loss", loss.item(), on_step=True, on_epoch=True)
+        self.log("loss", loss.item(), on_step=True, on_epoch=True, batch_size=self.batch_size)
         return loss
 
     def configure_optimizers(self):
@@ -72,7 +72,8 @@ class SwaV(pl.LightningModule):
             optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=self.lr)
         else:
             optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return optim
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
+        return [optim], [scheduler]
 
     def train_dataloader(self):
         miniimg = torchvision.datasets.ImageFolder(self.datapath)
