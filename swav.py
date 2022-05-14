@@ -35,7 +35,6 @@ class SwaV(pl.LightningModule):
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
-
         with torch.no_grad():
             emb_dim = backbone(torch.rand(1, 3, *img_orig_size)).flatten(1).shape[-1]
         if mpnn_opts["_use"]:
@@ -46,8 +45,8 @@ class SwaV(pl.LightningModule):
         self.datapath = data_path
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.projection_head = SwaVProjectionHead(emb_dim, emb_dim, 400)
-        self.prototypes = SwaVPrototypes(400, n_prototypes=1600)
+        self.projection_head = SwaVProjectionHead(emb_dim, emb_dim, 128)
+        self.prototypes = SwaVPrototypes(128, n_prototypes=512)
         self.criterion = SwaVLoss()
 
     def forward(self, x):
