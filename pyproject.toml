@@ -36,6 +36,8 @@ torchinfo = "^1.6.5"
 lightly = "^1.2.14"
 submitit = "^1.4.2"
 pytorch-metric-learning = "^1.3.0"
+higher = "^0.2.1"
+kornia = "^0.6.4"
 
 [tool.poetry.dev-dependencies]
 jupyter = "^1.0.0"

@@ -1,21 +1,22 @@
 seed_everything: 72
-slurm:
-  nodes: 1
-  mem_gb: 20
-  timeout: 15
-  # TODO: add new keys to other files
-  partition: general
-  constraint: ""
-  comment: ""
-  slurm_additional_parameters:
-    qos: medium
-    gres: gpu:a40:1
-    signal: SIGUSR1@90
+#slurm:
+#  nodes: 1
+#  mem_gb: 20
+#  timeout: 15
+#  # TODO: add new keys to other files
+#  partition: general
+#  constraint: ""
+#  comment: ""
+#  slurm_additional_parameters:
+#    qos: medium
+#    gres: gpu:a40:1
+#    signal: SIGUSR1@90
 model:
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
+  sup_finetune_lr: ${model.lr}
   sup_finetune: proto_maml # [prototune, std_proto, proto_maml]
   sup_finetune_epochs: 5 # 15 for prototune
   eta_min: 5e-5

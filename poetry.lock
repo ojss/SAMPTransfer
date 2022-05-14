@@ -527,6 +527,17 @@ python-versions = ">=3.7"
 numpy = ">=1.14.5"
 
 [[package]]
+name = "higher"
+version = "0.2.1"
+description = "A pytorch library allowing users to obtain higher order gradients over losses spanning training loops rather than individual training steps."
+category = "main"
+optional = false
+python-versions = ">=3.6.0"
+
+[package.dependencies]
+torch = "*"
+
+[[package]]
 name = "hjson"
 version = "3.0.2"
 description = "Hjson, a user interface for JSON."
@@ -999,6 +1010,23 @@ description = "A fast implementation of the Cassowary constraint solver"
 category = "main"
 optional = false
 python-versions = ">=3.7"
+
+[[package]]
+name = "kornia"
+version = "0.6.4"
+description = "Open Source Differentiable Computer Vision Library for PyTorch"
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+packaging = "*"
+torch = ">=1.8.1"
+
+[package.extras]
+all = ["accelerate (==0.5.1)", "pytest (==6.2.5)", "pytest-flake8 (==1.0.7)", "flake8 (==3.9.2)", "pytest-cov (==3.0.0)", "pytest-mypy (==0.9.1)", "pytest-xdist (==2.5.0)", "autopep8", "pydocstyle", "pre-commit (>=2.0)", "yapf", "isort", "numpy", "scipy", "dataclasses"]
+dev = ["pytest (==6.2.5)", "pytest-flake8 (==1.0.7)", "flake8 (==3.9.2)", "pytest-cov (==3.0.0)", "pytest-mypy (==0.9.1)", "pytest-xdist (==2.5.0)", "autopep8", "pydocstyle", "pre-commit (>=2.0)", "yapf", "isort", "numpy", "scipy"]
+x = ["accelerate (==0.5.1)", "dataclasses"]
 
 [[package]]
 name = "lightly"
@@ -2484,7 +2512,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = "3.9"
-content-hash = "fe657c80e2ac38f00991b02bd97389adc52a288307b86dda8930204eadbdb974"
+content-hash = "ab590fcdd10665ca73a9f7f334e6501b06e2bf4999713cc93a347bde3f53f54c"
 
 [metadata.files]
 absl-py = [
@@ -2932,6 +2960,10 @@ h5py = [
     {file = "h5py-3.6.0-cp39-cp39-win_amd64.whl", hash = "sha256:9fd8a14236fdd092a20c0bdf25c3aba3777718d266fabb0fdded4fcf252d1630"},
     {file = "h5py-3.6.0.tar.gz", hash = "sha256:8752d2814a92aba4e2b2a5922d2782d0029102d99caaf3c201a566bc0b40db29"},
 ]
+higher = [
+    {file = "higher-0.2.1-py3-none-any.whl", hash = "sha256:740387d25037e492c5556f51b118dcdfdd94081aaec06833b62db51afb8ac2b5"},
+    {file = "higher-0.2.1.tar.gz", hash = "sha256:f5b7baa668be5dc59cca9ae06c4ed14c2bd2fe5ca8283f95db660e8732513c1d"},
+]
 hjson = [
     {file = "hjson-3.0.2-py3-none-any.whl", hash = "sha256:5546438bf4e1b52bc964c6a47c4ed10fa5fba8a1b264e22efa893e333baad2db"},
     {file = "hjson-3.0.2.tar.gz", hash = "sha256:2838fd7200e5839ea4516ece953f3a19892c41089f0d933ba3f68e596aacfcd5"},
@@ -3086,6 +3118,10 @@ kiwisolver = [
     {file = "kiwisolver-1.4.2-pp37-pypy37_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0e8afdf533b613122e4bbaf3c1e42c2a5e9e2d1dd3a0a017749a7658757cb377"},
     {file = "kiwisolver-1.4.2-pp37-pypy37_pp73-win_amd64.whl", hash = "sha256:42f6ef9b640deb6f7d438e0a371aedd8bef6ddfde30683491b2e6f568b4e884e"},
     {file = "kiwisolver-1.4.2.tar.gz", hash = "sha256:7f606d91b8a8816be476513a77fd30abe66227039bd6f8b406c348cb0247dcc9"},
+]
+kornia = [
+    {file = "kornia-0.6.4-py2.py3-none-any.whl", hash = "sha256:642c0e8567ac305874fa05889523d906d761599d86e88b01558add744eb74dd4"},
+    {file = "kornia-0.6.4.tar.gz", hash = "sha256:ff60307a7244b315db43bfc4d4d6769094cf7d7494cf367c1d71a56343e2c50f"},
 ]
 lightly = [
     {file = "lightly-1.2.14-py3-none-any.whl", hash = "sha256:5f34a9f1a76c51ff44c5b9c357fda9fdf83a155be7ab369be83e6d95ea2bba11"},
