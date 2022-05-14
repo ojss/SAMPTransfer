@@ -48,6 +48,7 @@ class SwaV(pl.LightningModule):
         self.projection_head = SwaVProjectionHead(emb_dim, emb_dim, 128)
         self.prototypes = SwaVPrototypes(128, n_prototypes=512)
         self.criterion = SwaVLoss()
+        self.save_hyperparameters()
 
     def forward(self, x):
         x = self.backbone(x).flatten(start_dim=1)
@@ -63,6 +64,7 @@ class SwaV(pl.LightningModule):
         high_resolution = multi_crop_features[:2]
         low_resolution = multi_crop_features[2:]
         loss = self.criterion(high_resolution, low_resolution)
+        self.log("loss", loss.item(), on_step=True, on_epoch=True)
         return loss
 
     def configure_optimizers(self):
