@@ -16,7 +16,7 @@ from pytorch_lightning.utilities.cli import LightningCLI
 from torch import nn
 from torch.utils.data import DataLoader
 
-from feature_extractors.feature_extractor import CNN_4Layer
+from feature_extractors.feature_extractor import CNN_4Layer, create_model
 from utils.gnn_wrapper import GNN
 
 try:
@@ -31,7 +31,7 @@ class SwaV(pl.LightningModule):
                  img_orig_size: Tuple = (224, 224), ):
         super(SwaV, self).__init__()
         if arch == "conv4":
-            backbone = CNN_4Layer(in_channels=3, global_pooling=False, final_maxpool=True, ada_maxpool=True)
+            backbone = create_model(dict(in_planes=3, out_planes=[96, 128, 256, 512], num_stages=4, average_end=True))
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
