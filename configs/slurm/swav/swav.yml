@@ -1,68 +1,15 @@
-job_name: swav-${uuid:}
-seed_everything: 72
-nmb_crops: [ 2,  6 ]
-size_crops: [ 224,  96 ]
-min_scale_crops: [ 0.14,  0.05 ]
-max_scale_crops: [ 1.0,  0.14 ]
-crops_for_assign: [ 0, 1 ]
-gaussian_blur: True
-jitter_strength: 1.0
-input_height: 224
-
 model:
-  maxpool1: True
-  first_conv: True
-
-  nmb_crops: ${nmb_crops}
-  
-  batch_size: ${data.batch_size}
-  num_nodes: 1
-  gpus: 1  # per-node
-  max_epochs: ${trainer.max_epochs}
-  
-  optim: adam
-  learning_rate: 4.8
-  final_lr: 0.0048
-  start_lr: 0.3
-  
-  nmb_prototypes: 1800
-  online_ft: True
-
-  num_samples: 0
-  dataset: miniimagenet
   arch: conv4
-  hidden_mlp: 256
-  feat_dim: 64
-  warmup_epochs: 10
-  freeze_prototypes_epochs: 1
-  temperature: 0.1
-  sinkhorn_iterations: 3
-  queue_length: 0   # must be divisible by total batch-size
-  queue_path: queue
-  epoch_queue_starts: 15
-  exclude_bn_bias: False
-  weight_decay: 1e-6
-  epsilon: 0.05
-
-  sup_finetune: True
-  sup_finetune_lr: 1e-3
-  sup_finetune_epochs: 15
-  ft_freeze_backbone: True
-  finetune_batch_norm: False
-
-  kwargs:
-    input_height: ${input_height}
-    size_crops: ${size_crops}
-    min_scale_crops: ${min_scale_crops}
-    max_scale_crops: ${max_scale_crops}
-    crops_for_assign: ${crops_for_assign}
-    gaussian_blur: ${gaussian_blur}
-    jitter_strength: ${jitter_strength}
+  lr: 1e-3
+  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/train
+  img_orig_size: [ 224, 224 ]
+  batch_size: 4
+  num_workers: 0
   mpnn_opts:
-    _use: True
-    loss_cnn: True
+    _use: False
+    mpnn_dev: cpu
     scaling_ce: 1
-    task_adapt: False
+    adapt: task
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -94,42 +41,25 @@ model:
         dropout_p: 0.4
         use_batchnorm: 0
 
-
-data:
-  fsl_datapath: /home/nfs/oshirekar/unsupervised_ml/data/
-  data_dir: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
-  batch_size: 64
-  num_workers: 8
-
 trainer:
-  fast_dev_run: 1
-  max_epochs: 800
-  check_val_every_n_epochs: 10
-  limit_val_batches: 15
-  limit_test_batches: 600
+  fast_dev_run: False
+  max_epochs: 90
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
       project: SWaV
       save_dir: wandb_logs
       log_model: True
-      name: ${job_name}
+      name: ${oc.env:SLURM_JOB_ID}
   callbacks:
-    #    - class_path: pl_bolts.callbacks.ssl_online.SSLOnlineEvaluator
-    #      init_args:
-    #        drop_p: 0.0
-    #        hidden_dim: null
-    #        z_dim: ${model.feat_dim}
-    #        num_classes: 600
-    #        dataset: miniimagenet
     - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
       init_args:
         max_depth: 3
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./ckpts/${job_name}
+        dirpath: ./ckpts/${oc.env:SLURM_JOB_ID}
         filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
-        monitor: "val_loss"
+        monitor: loss_epoch
         save_last: True
         save_top_k: 1
         mode: min

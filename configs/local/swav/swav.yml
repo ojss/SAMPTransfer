@@ -1,67 +1,15 @@
-job_name: local_swav
-seed_everything: 72
-nmb_crops: [ 2,  6 ]
-size_crops: [ 224,  96 ]
-min_scale_crops: [ 0.14,  0.05 ]
-max_scale_crops: [ 1.0,  0.14 ]
-crops_for_assign: [ 0, 1 ]
-gaussian_blur: True
-jitter_strength: 1.0
-input_height: 224
-
 model:
-  maxpool1: True
-  first_conv: True
-
-  nmb_crops: ${nmb_crops}
-  
-  batch_size: ${data.batch_size}
-  num_nodes: 1
-  gpus: 1  # per-node
-  max_epochs: ${trainer.max_epochs}
-  
-  optim: adam
-  learning_rate: 1e-3
-  final_lr: 0.0048
-  start_lr: 0.3
-  
-  nmb_prototypes: 1800
-
-  num_samples: 0
-  dataset: miniimagenet
   arch: conv4
-  hidden_mlp: 256
-  feat_dim: 64
-  warmup_epochs: 10
-  freeze_prototypes_epochs: 1
-  temperature: 0.1
-  sinkhorn_iterations: 3
-  queue_length: 0   # must be divisible by total batch-size
-  queue_path: queue
-  epoch_queue_starts: 15
-  exclude_bn_bias: False
-  weight_decay: 1e-6
-  epsilon: 0.05
-
-  sup_finetune: True
-  sup_finetune_lr: 1e-3
-  sup_finetune_epochs: 15
-  ft_freeze_backbone: True
-  finetune_batch_norm: False
-
-  kwargs:
-    input_height: ${input_height}
-    size_crops: ${size_crops}
-    min_scale_crops: ${min_scale_crops}
-    max_scale_crops: ${max_scale_crops}
-    crops_for_assign: ${crops_for_assign}
-    gaussian_blur: ${gaussian_blur}
-    jitter_strength: ${jitter_strength}
+  lr: 1e-3
+  data_path: ../data/processed_images/train
+  img_orig_size: [ 224, 224 ]
+  batch_size: 4
+  num_workers: 0
   mpnn_opts:
     _use: False
-    loss_cnn: True
+    mpnn_dev: cpu
     scaling_ce: 1
-    task_adapt: False
+    adapt: task
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -94,17 +42,8 @@ model:
         use_batchnorm: 0
 
 
-data:
-  fsl_datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  data_dir: /home/ojass/projects/data/processed_images/
-  eval_ways: 5
-  eval_support_shots: 5
-  eval_query_shots: 15
-  batch_size: 10
-  num_workers: 1
-
 trainer:
-  fast_dev_run: 0
+  fast_dev_run: 1
   limit_train_batches: 100
   max_epochs: 800
   check_val_every_n_epoch: 10
@@ -114,7 +53,7 @@ trainer:
         max_depth: 3
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./ckpts/${job_name}
+        dirpath: ./ckpts/
         filename: "{epoch}-{step}-{val_loss:.2f}-{val_accuracy:.3f}-{train_accuracy_epoch:.3f}"
         monitor: "val_loss"
         save_last: True
