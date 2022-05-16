@@ -1,4 +1,5 @@
 import copy
+import math
 import sys
 import time
 
@@ -15,6 +16,7 @@ from lightly.models.modules import SimSiamProjectionHead
 from pytorch_lightning.utilities.cli import LightningCLI
 from torch import nn
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from dataloaders import get_episode_loader
 from feature_extractors.feature_extractor import create_model
@@ -52,6 +54,9 @@ class SimSiam(pl.LightningModule):
         self.optimiser = optimiser
         self.scheduler = scheduler
 
+        self.w = 0.9
+        self.register_buffer("avg_output_std", torch.tensor(0.))
+
         self.save_hyperparameters()
 
     def forward(self, x):
@@ -66,7 +71,14 @@ class SimSiam(pl.LightningModule):
         z0, p0 = self.forward(x0)
         z1, p1 = self.forward(x1)
         loss = 0.5 * (self.criterion(z0, p1) + self.criterion(z1, p0))
-        self.log("loss", loss.item(), on_step=True, on_epoch=True, batch_size=self.batch_size)
+        output = p0.detach()
+        output = F.normalize(output, dim=1)
+        output_std = torch.std(output, 0)
+        output_std = output_std.mean()
+        self.avg_output_std = self.w * self.avg_output_std + (1 - self.w) * output_std.item()
+        collapse_level = max(0., 1 - math.sqrt(128) * self.avg_output_std)
+        self.log("collapse_level", collapse_level, on_epoch=True, prog_bar=True)
+        self.log("loss", loss.item(), on_step=True, on_epoch=True, batch_size=self.batch_size, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
