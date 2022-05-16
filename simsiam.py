@@ -28,7 +28,7 @@ except ImportError as e:
 
 class SimSiam(pl.LightningModule):
     def __init__(self, arch: str, data_path: str, fsl_data_path: str,
-                 batch_size: int, num_workers: int, lr: float,
+                 batch_size: int, num_workers: int, lr: float, optimiser: str, scheduler: str,
                  input_size: int = 224):
         super(SimSiam, self).__init__()
         if arch == "conv4":
@@ -49,6 +49,10 @@ class SimSiam(pl.LightningModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.input_size = input_size
+        self.optimiser = optimiser
+        self.scheduler = scheduler
+
+        self.save_hyperparameters()
 
     def forward(self, x):
         f = self.backbone(x).flatten(1)
@@ -66,12 +70,18 @@ class SimSiam(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        if torch.cuda.is_available():
-            optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=self.lr)
-        else:
-            optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
-        return [optim], [scheduler]
+        scheduler = None
+        if self.optimiser == "adam":
+            if torch.cuda.is_available():
+                optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=self.lr)
+            else:
+                optim = torch.optim.Adam(self.parameters(), lr=self.lr)
+        elif self.optimiser == "sgd":
+            optim = torch.optim.SGD(self.parameters(), lr=self.lr)
+        if self.scheduler == "cos":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
+            return [optim], [scheduler]
+        return optim
 
     def train_dataloader(self):
 

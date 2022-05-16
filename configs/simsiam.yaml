@@ -1,13 +1,14 @@
-# job_name: dino-${uuid:}
 seed_everything: 72
 model:
-  arch: conv4
-  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/train
-  input_size: 84 # or can be 224
+  arch: resnet18
+  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/train
+  input_size: 224 # or can be 224
   fsl_data_path: /home/nfs/oshirekar/unsupervised_ml/data/
-  batch_size: 64
+  batch_size: 128
   num_workers: 6
-  adaptive_avg_pool: False
+  lr: 0.06
+  optimiser: sgd
+  scheduler: None
 
 trainer:
   gpus: 0
