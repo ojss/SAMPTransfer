@@ -20,7 +20,7 @@ model:
   sup_finetune: prototune # [prototune, std_proto, proto_maml]
   ft_freeze_backbone: False
   prototune_use_augs: False
-  sup_finetune_epochs: 5 # 15 for prototune
+  sup_finetune_epochs: 15 # 15 for prototune
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -36,7 +36,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: instance
+    adapt: ot
     temperature: 0.2
     output_train_gnn: plain
     graph_params:

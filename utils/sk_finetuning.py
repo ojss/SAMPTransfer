@@ -1,7 +1,6 @@
 import einops
 import numpy as np
 import torch
-import torch.distributed as dist
 import torch.nn.functional as F
 from pytorch_metric_learning.losses import SupConLoss
 from torch import nn
@@ -10,49 +9,8 @@ from torch.nn.utils import weight_norm
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
+from .sinkhorn import Sinkhorn2
 from .sup_finetuning import Classifier
-
-
-class SK(torch.nn.Module):
-    def __init__(self, num_iters: int = 3, epsilon: float = 0.05, world_size: int = 1) -> None:
-        super().__init__()
-        self.num_iters = num_iters
-        self.epsilon = epsilon
-        self.world_size = world_size
-
-    @torch.no_grad()
-    def forward(self, Q: torch.Tensor) -> torch.Tensor:
-        """
-        Q is the distance matrix between the points and prototypes. originally B x K
-        TODO: since normally it has cosine distances need to check if this will play well with Euclidean dists
-        """
-        # TODO: check if Q is to be normalised this way only for cosine distances or euclidean as well
-
-        # Q is K-by-B for consistency with notations from SWaV and our own processing schemes below
-        Q = torch.exp(Q / self.epsilon).t()
-        B = Q.shape[1] * self.world_size  # number of samples in the batch
-        K = Q.shape[0]  # number of prototypes, in our case number of eval_ways
-
-        # make the matrix sum up to 1
-        sum_Q = torch.sum(Q)
-        if dist.is_available() and dist.is_initialized():
-            dist.all_reduce(sum_Q)
-
-        Q /= sum_Q
-        for _ in range(self.num_iters):
-            # normalise each row: total weight per prototype must be 1/K
-            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
-            if dist.is_available() and dist.is_initialized():
-                dist.all_reduce(sum_of_rows)
-            Q /= sum_of_rows
-            Q /= K
-
-            # normalise each column: total weight per sample must be 1/B
-            Q /= torch.sum(Q, dim=0, keepdim=True)
-            Q /= B
-
-        Q *= B  # columns must sum to 1 so that Q is an assigment
-        return Q.t()
 
 
 def euclidean_distance(x, y):
@@ -67,7 +25,7 @@ def euclidean_distance(x, y):
 def sinkhorned_finetuning(encoder, episode, device='cpu', proto_init=True,
                           freeze_backbone=False, finetune_batch_norm=False,
                           inner_lr=0.001, total_epoch=15, n_way=5):
-    sk = SK()
+    sk = Sinkhorn2()
     sup_con_loss = SupConLoss()
     x_support = episode['train'][0][0]  # only take data & only first batch
     x_support = x_support.to(device)

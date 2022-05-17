@@ -25,6 +25,7 @@ from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
 
@@ -302,6 +303,12 @@ class CLRGAT(pl.LightningModule):
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
             z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
+        elif self.mpnn_opts["adapt"] == "ot":
+            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                     stopping_criterion=1e-4, device=self.device)
+            z_a_i = self.forward(x_a_i)
+            z_query = self.forward(x_b_i)
+            z_a_i, _ = transportation_module(z_a_i, z_query)
         else:
             z_a_i = self.model.backbone(x_a_i).flatten(1)
         self.train()
@@ -358,11 +365,14 @@ class CLRGAT(pl.LightningModule):
                     y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
                 # TODO: should only instance adaptation be used below?
-                if self.mpnn_opts["adapt"] in ["task", "proto_only", "instance"]:
+                if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot"]:
                     _, output = self.mpnn_forward(z_batch, y_batch)
                 # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
-                # elif self.mpnn_opts["adapt"] == "instance":
-                #     # lets use the entire query set?
+                elif self.mpnn_opts["adapt"] == "instance":
+                    # lets use the entire query set?
+                    combined = torch.cat([z_batch, x_b_i])
+                    _, combined = self.mpnn_forward(combined)
+                    output, _ = combined.split([len(z_batch), len(x_b_i)])
                 else:
                     output = self.model.backbone(z_batch).flatten(1)
                 preds = classifier(output)
@@ -397,7 +407,7 @@ class CLRGAT(pl.LightningModule):
             _, combined = self.mpnn_forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
         else:
-            output = self.backbone(x_b_i).flatten(1)
+            _, output = self.mpnn_forward(x_b_i)
         scores = classifier(output)
 
         loss = F.cross_entropy(scores, y_query, reduction='mean')
