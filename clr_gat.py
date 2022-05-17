@@ -25,6 +25,7 @@ from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
 
 
@@ -69,14 +70,15 @@ class CLRGAT(pl.LightningModule):
                  distance='euclidean',
                  mode='trainval',
                  eval_ways=5,
-                 sup_finetune=True,
+                 sup_finetune="prototune",
+                 prototune_use_augs=False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
                  finetune_batch_norm=False):
         super().__init__()
         self.save_hyperparameters()
-        self.backbone = feature_extractor
+        backbone = feature_extractor
 
         self.dataset = dataset
         self.batch_size = batch_size
@@ -98,6 +100,7 @@ class CLRGAT(pl.LightningModule):
         self.mode = mode
         self.eval_ways = eval_ways
         self.sup_finetune = sup_finetune
+        self.prototune_use_augs = prototune_use_augs
         self.sup_finetune_lr = sup_finetune_lr
         self.sup_finetune_epochs = sup_finetune_epochs
         self.ft_freeze_backbone = ft_freeze_backbone
@@ -106,14 +109,16 @@ class CLRGAT(pl.LightningModule):
 
         self.mpnn_opts = mpnn_opts
         if mpnn_opts["_use"]:
-            _, in_dim = self.backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+            _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
             self.dim = in_dim
-            self.model = GNN(self.backbone, in_dim, mpnn_dev, mpnn_opts)
+            self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts)
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
             elif mpnn_loss_fn == "ce":
                 self.gnn_loss = F.cross_entropy
+        else:
+            self.model = backbone
 
         self.automatic_optimization = True
 
@@ -180,7 +185,10 @@ class CLRGAT(pl.LightningModule):
         return z_cnn, z
 
     def forward(self, x):
-        _, z = self.model(x)
+        if self.mpnn_opts["_use"]:
+            _, z = self.model(x)
+        else:
+            z = self.model(x).flatten(1)
         return z
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
@@ -248,7 +256,7 @@ class CLRGAT(pl.LightningModule):
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
                   freeze_backbone=False, finetune_batch_norm=False,
-                  inner_lr=0.001, total_epoch=15, n_way=5):
+                  inner_lr=0.001, total_epoch=15, n_way=5, use_augs=False):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -305,19 +313,20 @@ class CLRGAT(pl.LightningModule):
         ###############################################################################################
         loss_fn = nn.CrossEntropyLoss().to(device)
         sup_con_loss = losses.SupConLoss()
-        augs = nn.Sequential(K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
-                             K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
-                             K.augmentation.RandomHorizontalFlip(),
-                             K.augmentation.RandomGrayscale(p=.2),
-                             K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
-                                                               sigma=(0.1, 2.0)))
+        if use_augs:
+            augs = nn.Sequential(K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
+                                 K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
+                                 K.augmentation.RandomHorizontalFlip(),
+                                 K.augmentation.RandomGrayscale(p=.2),
+                                 K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
+                                                                   sigma=(0.1, 2.0)))
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
             classifier.init_params_from_prototypes(z_a_i, n_way, n_support, z_proto=proto)
         classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, self.model.gnn.parameters()), lr=inner_lr)
+                filter(lambda p: p.requires_grad, self.model.gnn.parameters()), lr=self.lr)
         # Finetuning
         if freeze_backbone is False:
             self.model.gnn.train()
@@ -343,12 +352,16 @@ class CLRGAT(pl.LightningModule):
                     rand_id[j: min(j + batch_size, support_size)]).to(device)
 
                 z_batch = x_a_i[selected_id]
-                z_batch = torch.cat([z_batch, augs(z_batch)])
+                if use_augs:
+                    z_batch = torch.cat([z_batch, augs(z_batch)])
                 y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
                 # TODO: should only instance adaptation be used below?
                 if self.mpnn_opts["adapt"] in ["task", "proto_only", "instance"]:
                     _, output = self.mpnn_forward(z_batch, y_batch)
+                # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
+                # elif self.mpnn_opts["adapt"] == "instance":
+                #     # lets use the entire query set?
                 else:
                     output = self.model.backbone(z_batch).flatten(1)
                 preds = classifier(output)
@@ -516,13 +529,19 @@ class CLRGAT(pl.LightningModule):
                 freeze_backbone=self.ft_freeze_backbone,
                 finetune_batch_norm=self.finetune_batch_norm,
                 device=self.device,
-                n_way=self.eval_ways, )
-            self.load_state_dict(original_encoder_state)
+                n_way=self.eval_ways,
+                use_augs=self.prototune_use_augs)
         elif self.sup_finetune == "proto_maml":
             loss, acc = self.proto_maml(batch, batch_idx)
         elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = self.std_proto_form(batch, batch_idx)
+        elif self.sup_finetune == "sinkhorn":
+            loss, acc = sinkhorned_finetuning(self, episode=batch, device=self.device, proto_init=True,
+                                              freeze_backbone=self.ft_freeze_backbone,
+                                              finetune_batch_norm=self.finetune_batch_norm, n_way=self.eval_ways,
+                                              inner_lr=self.sup_finetune_lr)
+        self.load_state_dict(original_encoder_state)
         return loss, acc
 
     def validation_step(self, batch, batch_idx):
