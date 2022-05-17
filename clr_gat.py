@@ -352,9 +352,10 @@ class CLRGAT(pl.LightningModule):
                     rand_id[j: min(j + batch_size, support_size)]).to(device)
 
                 z_batch = x_a_i[selected_id]
+                y_batch = y_a_i[selected_id]
                 if use_augs:
                     z_batch = torch.cat([z_batch, augs(z_batch)])
-                y_batch = y_a_i[selected_id].repeat(2)
+                    y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
                 # TODO: should only instance adaptation be used below?
                 if self.mpnn_opts["adapt"] in ["task", "proto_only", "instance"]:
@@ -382,12 +383,12 @@ class CLRGAT(pl.LightningModule):
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
         if self.mpnn_opts["adapt"] == "task":
             # proto level feature sharing
-            z_support = self.backbone(x_a_i).flatten(1)
+            z_support = self.model.backbone(x_a_i).flatten(1)
             z_proto = z_support.view(nmb_proto, n_support, -1).mean(1)
-            z_query = self.backbone(x_b_i).flatten(1)
+            z_query = self.model.backbone(x_b_i).flatten(1)
             combined = torch.cat([z_proto, z_query])
-            edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
-            _, (combined,) = self.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+            edge_attr, edge_index, combined = self.model.graph_generator.get_graph(combined, Y=None)
+            _, (combined,) = self.model.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
             proto, query = combined.split([nmb_proto, len(z_query)])
             output = query
         # cannot do proto adapt here

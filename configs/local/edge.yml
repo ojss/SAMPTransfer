@@ -5,7 +5,7 @@ model:
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.01
-  sup_finetune: sinkhorn # [prototune, std_proto, proto_maml, sinkhorn]
+  sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821

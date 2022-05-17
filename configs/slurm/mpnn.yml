@@ -36,7 +36,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: task
+    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -87,7 +87,7 @@ trainer:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
       name: ${oc.env:SLURM_JOB_ID}
-      project: PCLR-OboW
+      project: CLR+GAT
       save_dir: wandb_logs
       log_model: True
   callbacks:
