@@ -38,6 +38,8 @@ submitit = "^1.4.2"
 pytorch-metric-learning = "^1.3.0"
 higher = "^0.2.1"
 kornia = "^0.6.4"
+faiss-cpu = "^1.7.2"
+torchattacks = "^3.2.6"
 
 [tool.poetry.dev-dependencies]
 jupyter = "^1.0.0"
