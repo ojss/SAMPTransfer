@@ -66,7 +66,7 @@ class NNCLR(pl.LightningModule):
             net = torchvision.models.__dict__[arch](pretrained=False)
             self.backbone = nn.Sequential(*list(net.children())[:-1])
         self.z_dim = self.backbone(torch.randn(1, 3, input_size, input_size)).flatten(1).shape[-1]
-        self.projection_out_dim = self.z_dim // 4 if None else projection_out_dim
+        self.projection_out_dim = self.z_dim // 4 if projection_out_dim is None else projection_out_dim
         # TODO: try without using the projection and prediction heads
         self.projection_head = NNCLRProjectionHead(self.z_dim, self.z_dim, self.projection_out_dim)
         self.prediction_head = NNCLRPredictionHead(self.projection_out_dim, self.z_dim, self.projection_out_dim)
