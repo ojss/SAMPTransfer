@@ -43,4 +43,9 @@ trainer:
       init_args:
         logging_interval: "step"
     - class_path: pl_bolts.callbacks.PrintTableMetricsCallback
+    - class_path: callbacks.AutoUMAP
+      init_args:
+        args:
+          name: test
+        frequency: 1
 

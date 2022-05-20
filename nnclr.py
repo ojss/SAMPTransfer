@@ -108,17 +108,21 @@ class NNCLR(pl.LightningModule):
                     optim = deepspeed.ops.adam.FusedAdam(self.parameters(), lr=self.lr)
                 else:
                     optim = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
-        return [optim], [scheduler]
+        if self.scheduler == "cos":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.trainer.max_epochs)
+            return [optim], [scheduler]
+        return [optim]
 
-    # def train_dataloader(self):
-    #     miniimg = torchvision.datasets.ImageFolder(self.data_path + "/train")
-    #     collate_fn = SimCLRCollateFunction(input_size=self.input_size)
-    #     dataset = LightlyDataset.from_torch_dataset(miniimg)
-    #     dataloader = DataLoader(dataset, batch_size=self.bsize, collate_fn=collate_fn, shuffle=True, drop_last=True,
-    #                             num_workers=self.num_workers
-    #                             )
-    #     return dataloader
+    def train_dataloader(self):
+        miniimg = torchvision.datasets.ImageFolder(self.data_path + "/train")
+        miniimg_val = torchvision.datasets.ImageFolder(self.data_path + "/val")
+        miniimg = ConcatDataset([miniimg, miniimg_val])
+        collate_fn = SimCLRCollateFunction(input_size=self.input_size)
+        dataset = LightlyDataset.from_torch_dataset(miniimg)
+        dataloader = DataLoader(dataset, batch_size=self.bsize, collate_fn=collate_fn, shuffle=True, drop_last=True,
+                                num_workers=self.num_workers
+                                )
+        return dataloader
 
 
 def cli_main():
