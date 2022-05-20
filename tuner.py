@@ -1,14 +1,16 @@
 import math
 import os
+import sys
 
 import pytorch_lightning as pl
+import ray
 from pytorch_lightning.loggers import TensorBoardLogger
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.integration.pytorch_lightning import TuneReportCheckpointCallback
 from ray.tune.schedulers import PopulationBasedTraining
 
-from nnclr import NNCLR, NNCLRDataModule
+from nnclr import NNCLR
 
 
 def train_nnclr_tune_checkpoint(config,
@@ -50,7 +52,7 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
         "projection_out_dim": tune.choice([64, 128, 512]),
         "lr": 1e-3,
         "bsize": 64,
-        "num_workers": 4,
+        "num_workers": 2,
         "optimiser": tune.choice(["sgd", "adam"]),
         "scheduler": tune.choice(["cos", None])
     }
@@ -89,5 +91,8 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
 
 
 if __name__ == "__main__":
+    redis_password = sys.argv[1]
+    num_cpus = int(sys.argv[2])
+    ray.init(address=os.environ["ip_head"], redis_password=redis_password)
     tune_nnclr_pbt(10, num_epochs=50, gpus_per_trial=1,
                    data_dir="/home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/")

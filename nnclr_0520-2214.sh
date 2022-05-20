@@ -10,6 +10,7 @@
 #SBATCH --nodes=1
 ### Give all resources to a single Ray task, ray can manage the resources internally
 #SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:a40:1
 #SBATCH --time=00-07:00:00
 #SBATCH --partition=general
@@ -67,4 +68,4 @@ for ((i = 1; i <= worker_num; i++)); do
 done
 
 # ===== Call your code below =====
-python tuner.py
+python tuner.py $redis_password
