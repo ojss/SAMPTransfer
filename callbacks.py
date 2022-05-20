@@ -66,7 +66,7 @@ def random_string(letter_count=4, digit_count=4):
 class AutoUMAP(Callback):
     def __init__(
             self,
-            args: Namespace,
+            args: dict,
             logdir: Union[str, Path] = Path("auto_umap"),
             frequency: int = 1,
             keep_previous: bool = False,
@@ -86,7 +86,7 @@ class AutoUMAP(Callback):
         """
 
         super().__init__()
-
+        args = Namespace(**args)
         self.args = args
         self.logdir = Path(logdir)
         self.frequency = frequency
