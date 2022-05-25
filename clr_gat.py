@@ -1,4 +1,4 @@
-__all__ = ['CLRGAT']
+__all__ = ['CLRGAT', 'GNN']
 
 import copy
 import uuid
@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from deepspeed.ops.adam import FusedAdam
+from lightly.models.modules import NNCLRProjectionHead
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
 from pytorch_metric_learning import losses
@@ -21,6 +22,7 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 from dataloaders import UnlabelledDataModule
+from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from proto_utils import (get_prototypes,
@@ -31,20 +33,30 @@ from utils.sup_finetuning import Classifier
 
 
 class GNN(nn.Module):
-    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict):
+    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, v2: bool = False):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
         self.mpnn_opts = mpnn_opts
+        self.v2 = v2
         mpnn_dev = mpnn_dev
-        self.gnn = GNNReID(mpnn_dev, mpnn_opts["gnn_params"], emb_dim)
+        if v2:
+            self.gnn = GAT(in_channels=emb_dim, hidden_channels=emb_dim // 4, out_channels=emb_dim,
+                           num_layers=mpnn_opts["gnn_params"]["gnn"]["num_layers"],
+                           heads=mpnn_opts["gnn_params"]["gnn"]["num_heads"],
+                           v2=True, )
+        else:
+            self.gnn = GNNReID(mpnn_dev, mpnn_opts["gnn_params"], emb_dim)
         self.graph_generator = GraphGenerator(mpnn_dev, **mpnn_opts["graph_params"])
 
     def forward(self, x):
         z = self.backbone(x).flatten(1)
         z_cnn = z.clone()
         edge_attr, edge_index, z = self.graph_generator.get_graph(z)
-        _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        if self.v2:
+            z = self.gnn(z, edge_index.t().contiguous())
+        else:
+            _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
         return z_cnn, z
 
 
@@ -60,6 +72,7 @@ class CLRGAT(pl.LightningModule):
                  mpnn_opts: dict,
                  mpnn_dev: str,
                  img_orig_size: Iterable,
+                 gat_v2: bool = False,
                  optim: str = 'adam',
                  dataset='omniglot',
                  weight_decay=0.01,
@@ -75,6 +88,7 @@ class CLRGAT(pl.LightningModule):
                  prototune_use_augs=False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
+                 finetune_use_projector: Optional[int] = None,
                  ft_freeze_backbone=True,
                  finetune_batch_norm=False):
         super().__init__()
@@ -106,13 +120,18 @@ class CLRGAT(pl.LightningModule):
         self.sup_finetune_epochs = sup_finetune_epochs
         self.ft_freeze_backbone = ft_freeze_backbone
         self.finetune_batch_norm = finetune_batch_norm
+        self.finetune_use_projector = finetune_use_projector
         self.img_orig_size = img_orig_size
 
         self.mpnn_opts = mpnn_opts
+        _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+
+        self.dim = in_dim
         if mpnn_opts["_use"]:
-            _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
-            self.dim = in_dim
-            self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts)
+            if gat_v2:
+                self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, v2=True)
+            elif not gat_v2:
+                self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts)
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
@@ -312,8 +331,14 @@ class CLRGAT(pl.LightningModule):
         else:
             z_a_i = self.model.backbone(x_a_i).flatten(1)
         self.train()
+
+        # Define projector layer
+        if self.finetune_use_projector is not None:
+            projector = NNCLRProjectionHead(1600, 1600, self.finetune_use_projector)
+            input_dim = self.finetune_use_projector
+        else:
+            input_dim = z_a_i.shape[1]
         # Define linear classifier
-        input_dim = z_a_i.shape[1]
         classifier = Classifier(input_dim, n_way=n_way)
         classifier.to(device)
         classifier.train()
@@ -330,7 +355,11 @@ class CLRGAT(pl.LightningModule):
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
             classifier.init_params_from_prototypes(z_a_i, n_way, n_support, z_proto=proto)
-        classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
+        if self.finetune_use_projector:
+            parameters = list(classifier.parameters()) + list(projector.parameters())
+        else:
+            parameters = list(classifier.parameters())
+        classifier_opt = torch.optim.Adam(parameters, lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
                 filter(lambda p: p.requires_grad, self.model.gnn.parameters()), lr=self.lr)
@@ -354,7 +383,6 @@ class CLRGAT(pl.LightningModule):
                     delta_opt.zero_grad()
 
                 #####################################
-                # breakpoint()
                 selected_id = torch.from_numpy(
                     rand_id[j: min(j + batch_size, support_size)]).to(device)
 
@@ -364,7 +392,6 @@ class CLRGAT(pl.LightningModule):
                     z_batch = torch.cat([z_batch, augs(z_batch)])
                     y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
-                # TODO: should only instance adaptation be used below?
                 if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot"]:
                     _, output = self.mpnn_forward(z_batch, y_batch)
                 # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
@@ -375,9 +402,12 @@ class CLRGAT(pl.LightningModule):
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
                 else:
                     output = self.model.backbone(z_batch).flatten(1)
+
+                if self.finetune_use_projector:
+                    output = projector(output)
                 preds = classifier(output)
                 loss = loss_fn(preds, y_batch)
-                if freeze_backbone is False:
+                if freeze_backbone is False or self.finetune_use_projector:
                     loss += sup_con_loss(output, y_batch)
 
                 #####################################
