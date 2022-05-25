@@ -1,0 +1,87 @@
+seed_everything: 72
+model:
+  optim: "adam"
+  lr_sch: "step"
+  warmup_start_lr: 1e-3
+  warmup_epochs: 250
+  eta_min: 5e-5
+  lr: 1e-3
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
+  weight_decay: 0.0001
+  alpha_cosine: False
+  bow_clr: False
+  clr_loss: False
+  clr_on_bow: False
+  graph_conv_opts:
+    use_graph_conv: True
+    k: 5
+    aggregation: mean
+    mlp: False
+    task_adapt: False
+  vicreg_opts:
+    use_vicreg: False
+  moco_opts:
+    use_moco: False
+  bow_levels: [ "block4" ]
+  bow_extractor_opts:
+    inv_delta: 10
+    num_words: 8192
+  bow_predictor_opts:
+    kappa: 5
+  alpha: 0.99
+  feature_extractor:
+    class_path: bow.feature_extractor.CNN_4Layer
+    init_args:
+      in_channels: 3
+      hidden_size: 64
+      out_channels: 64
+      global_pooling: False
+      graph_conv: ${model.graph_conv_opts.use_graph_conv}
+trainer:
+  gpus: -1
+  accumulate_grad_batches: 2
+  num_sanity_val_steps: 2
+  fast_dev_run: False
+  max_epochs: 2500
+  min_epochs: 300
+  limit_train_batches: 100
+  limit_val_batches: 15
+  limit_test_batches: 600
+  logger:
+    class_path: pytorch_lightning.loggers.WandbLogger
+    init_args:
+      project: PCLR-OboW
+      save_dir: wandb_logs
+      log_model: True
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: ./ckpts/${job_name}
+        monitor: "val_accuracy"
+        save_top_k: 10
+        every_n_epochs: 1
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        patience: 200
+        monitor: "val_accuracy"
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
+    - class_path: callbacks.ConfidenceIntervalCallback
+      init_args:
+        log_to_wb: True
+
+data:
+  dataset: "miniimagenet"
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
+  n_support: 1
+  n_query: 3
+  batch_size: 64
+  num_workers: 6
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 84, 84 ]
+  no_aug_support: True
