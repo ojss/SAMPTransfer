@@ -21,6 +21,18 @@ def conv3x3(in_channels, out_channels, return_indices=False, **kwargs):
     )
 
 
+def euclidean_distance2(x, y):
+    n = x.size(0)
+    m = y.size(0)
+    d = x.size(1)
+
+    x = x.unsqueeze(1).expand(n, m, d)
+    y = y.unsqueeze(0).expand(n, m, d)
+    dist = torch.pow(x - y, 2).sum(2)
+
+    return dist
+
+
 # Cell
 def euclidean_distance(x, y):
     """

@@ -1,0 +1,103 @@
+seed_everything: 72
+model:
+  optim: adam
+  lr_sch: step
+  warmup_start_lr: 1e-3
+  warmup_epochs: 250
+  sup_finetune_lr: 0.0001563663718906821
+  sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
+  sup_finetune_epochs: 15
+  eta_min: 5e-5
+  lr: 0.0001563663718906821
+  lr_decay_step: 25000
+  lr_decay_rate: 0.5
+  weight_decay: 6.059722614369727e-06
+  img_orig_size: ${data.img_size_orig}
+  batch_size: ${data.batch_size}
+  n_support: ${data.n_support}
+  n_query: ${data.n_query}
+  mpnn_loss_fn: ce
+  mpnn_dev: cuda
+  mpnn_opts:
+    _use: True
+    loss_cnn: True
+    scaling_ce: 1
+    adapt: re_rep
+    temperature: 0.2
+    output_train_gnn: plain
+    graph_params:
+      sim_type: "correlation"
+      thresh: "no" #0
+      set_negative: "hard"
+    gnn_params:
+      pretrained_path: "no"
+      red: 1
+      cat: 0
+      every: 0
+      gnn:
+        num_layers: 1
+        aggregator: "add"
+        num_heads: 1
+        attention: "dot"
+        mlp: 1
+        dropout_mlp: 0.1
+        norm1: 1
+        norm2: 1
+        res1: 1
+        res2: 1
+        dropout_1: 0.1
+        dropout_2: 0.1
+        mult_attr: 0
+      classifier:
+        neck: 1
+        num_classes: 0
+        dropout_p: 0.4
+        use_batchnorm: 0
+  feature_extractor:
+    class_path: feature_extractors.feature_extractor.CNN_4Layer
+    init_args:
+      global_pooling: False
+      in_channels: 3
+      final_maxpool: True
+      ada_maxpool: False
+trainer:
+  gpus: -1
+  num_sanity_val_steps: 1
+  fast_dev_run: 1
+  max_epochs: 1500
+  limit_train_batches: 100
+  limit_val_batches: 15
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
+      init_args:
+        max_depth: 3
+    - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "./ckpts/"
+        monitor: "val_accuracy"
+        save_top_k: 10
+        every_n_epochs: 1
+        mode: "max"
+
+    - class_path: pytorch_lightning.callbacks.EarlyStopping
+      init_args:
+        patience: 200
+        monitor: "val_accuracy"
+        mode: "max"
+    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: "step"
+
+data:
+  dataset: "miniimagenet"
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  full_size_path: /home/ojass/projects/data/processed_images/
+  #  full_size_path: ../data/processed_images
+  n_support: 1
+  n_query: 3
+  batch_size: 10
+  num_workers: 0
+  tfm_method: vicreg
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 84, 84 ]
+  no_aug_support: True

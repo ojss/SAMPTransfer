@@ -1,3 +1,4 @@
+import einops
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -5,6 +6,8 @@ from torch import nn
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
+
+from proto_utils import get_prototypes, prototypical_loss
 
 
 class Classifier(nn.Module):
@@ -27,6 +30,60 @@ class Classifier(nn.Module):
             1) if z_proto is None else z_proto  # the shape of z is [n_data, n_dim]
         # Interpretation of ProtoNet as linear layer (see Snell et al. (2017))
         self._set_params(weight=2 * z_proto, bias=-torch.norm(z_proto, dim=-1) ** 2)
+
+
+def std_proto_form(self, batch, batch_idx):
+    x_support = batch["train"][0]
+    y_support = batch["train"][1]
+    x_support = x_support
+    y_support = y_support
+
+    x_query = batch["test"][0]
+    y_query = batch["test"][1]
+    x_query = x_query
+    y_query = y_query
+
+    # Extract shots
+    shots = int(x_support.size(1) / self.eval_ways)
+    test_shots = int(x_query.size(1) / self.eval_ways)
+
+    # Extract features (first dim is batch dim)
+    x = torch.cat([x_support, x_query], 1)
+    x = einops.rearrange(x, "1 b c h w -> b c h w")
+    if not self.mpnn_opts["_use"]:
+        z = self.model.backbone(x)
+        z = einops.rearrange(z, "b c h w -> b (c h w)")
+    elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "re_rep":
+        _, z = self.mpnn_forward(x)
+        z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, self.re_rep_temp))
+    else:
+        # adapt instances by default
+        _, z = self.mpnn_forward(x)
+    z = einops.rearrange(z, "b e -> 1 b e")
+    z_support = z[:, :self.eval_ways * shots]
+    z_query = z[:, self.eval_ways * shots:]
+
+    # Calucalte prototypes
+    z_proto = get_prototypes(z_support, y_support, self.eval_ways)
+    # implementing GAT based adaptation:
+    if self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "task":
+        z_proto, z_query = einops.rearrange(z_proto, "1 b e -> b e"), einops.rearrange(z_query, "1 b e -> b e")
+        combined = torch.cat([z_proto, z_query])
+        edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
+        _, (combined,) = self.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        z_proto, z_query = combined.split([self.eval_ways, len(z_query)])  # split based on number of prototypes
+        z_proto, z_query = einops.rearrange(z_proto, "b e -> 1 b e"), einops.rearrange(z_query, "b e -> 1 b e")
+    elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "proto_only":
+        # adapt only the prototypes? like FEAT
+        z_proto = einops.rearrange(z_proto, "1 b e -> b e")
+        edge_attr, edge_index, z_proto = self.graph_generator.get_graph(z_proto)
+        _, (z_proto,) = self.gnn(z_proto, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        z_proto = einops.rearrange(z_proto, "b e -> 1 b e")
+
+    # Calculate loss and accuracies
+    loss, acc = prototypical_loss(z_proto, z_query, y_query,
+                                  distance=self.distance)
+    return loss, acc
 
 
 @torch.enable_grad()
