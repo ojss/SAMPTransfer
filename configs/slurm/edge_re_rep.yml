@@ -57,7 +57,7 @@ trainer:
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./ckpts/${job_name}
+        dirpath: ./ckpts/${oc.env:SLURM_JOB_ID}
         monitor: "val_accuracy"
         save_top_k: 10
         every_n_epochs: 1
