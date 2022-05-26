@@ -4,7 +4,6 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple
 
-import einops
 import kornia as K
 import numpy as np
 import pl_bolts.optimizers
@@ -23,7 +22,7 @@ from tqdm.auto import tqdm
 from clr_gat import GNN
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
-                         prototypical_loss, euclidean_distance2)
+                         prototypical_loss)
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
@@ -289,28 +288,7 @@ class CLRGATREP(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
         self.eval()
-        proto = None
-        if self.mpnn_opts["adapt"] == "task":
-            z_support = self.model.backbone(x_a_i).flatten(1)
-            z_query = self.model.backbone(x_b_i).flatten(1)
-            nmb_proto = n_way
-            z_proto = z_support.view(nmb_proto, n_support, -1).mean(1)
-            combined = torch.cat([z_proto, z_query])
-            edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
-            _, (combined,) = self.model.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-            proto, query = combined.split([nmb_proto, len(z_query)])  # split based on number of prototypes
-            z_a_i = z_support
-        elif self.mpnn_opts["adapt"] == "proto_only":
-            # instance level feature sharing
-            combined = torch.cat([x_a_i, x_b_i])
-            combined = self.model.backbone(combined).flatten(1)
-            z_support, z_query = combined.split([n_support * n_way, len(x_b_i)])
-            z_proto = z_support.view(n_way, n_support, -1).mean(1)
-            edge_attr, edge_index, z_proto = self.graph_generator.get_graph(z_proto, Y=None)
-            _, (z_proto,) = self.model.gnn(z_proto, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-            proto = z_proto
-            z_a_i = z_support
-        elif self.mpnn_opts["adapt"] == "instance":
+        if self.mpnn_opts["adapt"] == "instance":
             # TODO: change instance to include both x_a_i and x_b_i
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
@@ -346,7 +324,7 @@ class CLRGATREP(pl.LightningModule):
                                                                    sigma=(0.1, 2.0)))
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
-            classifier.init_params_from_prototypes(z_a_i, n_way, n_support, z_proto=proto)
+            classifier.init_params_from_prototypes(z_a_i, n_way, n_support,)
         classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
@@ -380,10 +358,8 @@ class CLRGATREP(pl.LightningModule):
                     z_batch = torch.cat([z_batch, augs(z_batch)])
                     y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
-                if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot"]:
-                    _, output = self.mpnn_forward(z_batch, y_batch)
                 # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
-                elif self.mpnn_opts["adapt"] == "instance":
+                if self.mpnn_opts["adapt"] == "instance":
                     # lets use the entire query set?
                     combined = torch.cat([z_batch, x_b_i])
                     _, combined = self.mpnn_forward(combined)
@@ -411,18 +387,8 @@ class CLRGATREP(pl.LightningModule):
         self.eval()
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
-        if self.mpnn_opts["adapt"] == "task":
-            # proto level feature sharing
-            z_support = self.model.backbone(x_a_i).flatten(1)
-            z_proto = z_support.view(nmb_proto, n_support, -1).mean(1)
-            z_query = self.model.backbone(x_b_i).flatten(1)
-            combined = torch.cat([z_proto, z_query])
-            edge_attr, edge_index, combined = self.model.graph_generator.get_graph(combined, Y=None)
-            _, (combined,) = self.model.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-            proto, query = combined.split([nmb_proto, len(z_query)])
-            output = query
-        # cannot do proto adapt here
-        elif self.mpnn_opts["adapt"] == "instance":
+
+        if self.mpnn_opts["adapt"] == "instance":
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
