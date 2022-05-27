@@ -49,6 +49,7 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
     config = {
         "arch": "conv4",
         "conv_4_out_planes": tune.choice([64, [96, 128, 256, 512]]),
+        "use_projector": tune.choice([True, False]),
         "projection_out_dim": tune.choice([64, 128, 512]),
         "lr": 1e-3,
         "bsize": 64,
@@ -65,7 +66,7 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
         })
 
     reporter = CLIReporter(
-        parameter_columns=["projection_out_dim", "lr", "bsize"],
+        parameter_columns=["projection_out_dim", "lr", "bsize", "use_projector"],
         metric_columns=["loss_step", "loss_epoch", "training_iteration"]
     )
 

@@ -56,7 +56,9 @@ class NNCLR(pl.LightningModule):
     def __init__(self, arch: str, data_path: str,
                  bsize: int, num_workers: int, lr: float, optimiser: str, scheduler: str,
                  conv_4_out_planes: Union[Iterable, int] = 64,
-                 input_size: int = 84, projection_out_dim: int = None):
+                 input_size: int = 84,
+                 use_projector: bool = True,
+                 projection_out_dim: int = None):
         super(NNCLR, self).__init__()
         self.out_planes = conv_4_out_planes
         if arch == "conv4":
@@ -68,7 +70,10 @@ class NNCLR(pl.LightningModule):
         self.z_dim = self.backbone(torch.randn(1, 3, input_size, input_size)).flatten(1).shape[-1]
         self.projection_out_dim = self.z_dim // 4 if projection_out_dim is None else projection_out_dim
         # TODO: try without using the projection and prediction heads
-        self.projection_head = NNCLRProjectionHead(self.z_dim, self.z_dim, self.projection_out_dim)
+        if use_projector:
+            self.projection_head = NNCLRProjectionHead(self.z_dim, self.z_dim, self.projection_out_dim)
+        else:
+            self.projection_head = nn.Identity()
         self.prediction_head = NNCLRPredictionHead(self.projection_out_dim, self.z_dim, self.projection_out_dim)
         self.memory_bank = NNMemoryBankModule(size=8192)
 
