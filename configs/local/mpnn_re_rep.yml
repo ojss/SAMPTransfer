@@ -7,6 +7,7 @@ model:
   sup_finetune_lr: 0.0001563663718906821
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
+  use_projector: True
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -62,6 +63,7 @@ model:
       ada_maxpool: False
 trainer:
   gpus: -1
+  #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 1500
@@ -78,7 +80,6 @@ trainer:
         save_top_k: 10
         every_n_epochs: 1
         mode: "max"
-
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         patience: 200
@@ -90,12 +91,13 @@ trainer:
 
 data:
   dataset: "miniimagenet"
+  #  datapath: ../data/
   datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
   full_size_path: /home/ojass/projects/data/processed_images/
   #  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
-  batch_size: 10
+  batch_size: 64
   num_workers: 0
   tfm_method: vicreg
   img_size_orig: [ 84, 84 ]
