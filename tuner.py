@@ -47,13 +47,14 @@ def train_nnclr_tune_checkpoint(config,
 
 def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/data"):
     config = {
+        "data_path": data_dir,
         "arch": "conv4",
         "conv_4_out_planes": tune.choice([64, [96, 128, 256, 512]]),
         "use_projector": tune.choice([True, False]),
         "projection_out_dim": tune.choice([64, 128, 512]),
         "lr": 1e-3,
         "bsize": 64,
-        "num_workers": 2,
+        "num_workers": 4,
         "optimiser": tune.choice(["sgd", "adam"]),
         "scheduler": tune.choice(["cos", None])
     }
@@ -66,7 +67,8 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
         })
 
     reporter = CLIReporter(
-        parameter_columns=["projection_out_dim", "lr", "bsize", "use_projector"],
+        parameter_columns=["projection_out_dim", "lr", "bsize", "use_projector", "optimiser", "scheduler",
+                           "conv_4_out_planes"],
         metric_columns=["loss_step", "loss_epoch", "training_iteration"]
     )
 
@@ -77,7 +79,7 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
             num_gpus=gpus_per_trial,
             data_dir=data_dir),
         resources_per_trial={
-            "cpu": 4,
+            "cpu": 6,
             "gpu": gpus_per_trial
         },
         metric="loss_epoch",
@@ -94,6 +96,6 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
 if __name__ == "__main__":
     redis_password = sys.argv[1]
     num_cpus = int(sys.argv[2])
-    ray.init(address=os.environ["ip_head"], redis_password=redis_password)
-    tune_nnclr_pbt(10, num_epochs=50, gpus_per_trial=1,
+    ray.init(address=os.environ["ip_head"])
+    tune_nnclr_pbt(100, num_epochs=15, gpus_per_trial=1,
                    data_dir="/home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/")
