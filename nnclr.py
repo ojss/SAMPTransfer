@@ -58,7 +58,9 @@ class NNCLR(pl.LightningModule):
                  conv_4_out_planes: Union[Iterable, int] = 64,
                  input_size: int = 84,
                  use_projector: bool = True,
-                 projection_out_dim: int = None):
+                 projection_out_dim: int = 256,
+                 proj_hidden_dim: int = 2048,
+                 prediction_hidden_dim: int = 4096):
         super(NNCLR, self).__init__()
         self.out_planes = conv_4_out_planes
         if arch == "conv4":
@@ -71,10 +73,12 @@ class NNCLR(pl.LightningModule):
         self.projection_out_dim = self.z_dim // 4 if projection_out_dim is None else projection_out_dim
         # TODO: try without using the projection and prediction heads
         if use_projector:
-            self.projection_head = NNCLRProjectionHead(self.z_dim, self.z_dim, self.projection_out_dim)
+            self.projection_head = NNCLRProjectionHead(self.z_dim, proj_hidden_dim, self.projection_out_dim)
         else:
             self.projection_head = nn.Identity()
-        self.prediction_head = NNCLRPredictionHead(self.projection_out_dim, self.z_dim, self.projection_out_dim)
+        self.prediction_head = NNCLRPredictionHead(self.projection_out_dim,
+                                                   prediction_hidden_dim,
+                                                   self.projection_out_dim)
         self.memory_bank = NNMemoryBankModule(size=8192)
 
         self.criterion = NTXentLoss()
