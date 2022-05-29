@@ -69,7 +69,8 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
         })
 
     reporter = CLIReporter(
-        parameter_columns=["projection_out_dim", "lr", "bsize", "use_projector", "optimiser", "scheduler",
+        parameter_columns=["projection_out_dim", "proj_hidden_dim", "prediction_hidden_dim", "lr", "bsize",
+                           "use_projector", "optimiser", "scheduler",
                            "conv_4_out_planes"],
         metric_columns=["loss_step", "loss_epoch", "training_iteration"]
     )
