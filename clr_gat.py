@@ -25,6 +25,7 @@ from dataloaders import UnlabelledDataModule
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
+from graph.latentgnn import LatentGNNV1
 from proto_utils import (get_prototypes,
                          prototypical_loss)
 from utils.optimal_transport import OptimalTransport
@@ -33,30 +34,41 @@ from utils.sup_finetuning import Classifier
 
 
 class GNN(nn.Module):
-    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, v2: bool = False):
+    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat"):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
         self.mpnn_opts = mpnn_opts
-        self.v2 = v2
+        self.gnn_type = gnn_type
         mpnn_dev = mpnn_dev
-        if v2:
+        if gnn_type == "gat_v2":
             self.gnn = GAT(in_channels=emb_dim, hidden_channels=emb_dim // 4, out_channels=emb_dim,
                            num_layers=mpnn_opts["gnn_params"]["gnn"]["num_layers"],
                            heads=mpnn_opts["gnn_params"]["gnn"]["num_heads"],
                            v2=True, )
-        else:
+        elif gnn_type == "gat":
             self.gnn = GNNReID(mpnn_dev, mpnn_opts["gnn_params"], emb_dim)
+        elif gnn_type == "latentgnn":
+            self.gnn = LatentGNNV1(in_channels=64, latent_dims=[16, 16], channel_stride=2,
+                                   num_kernels=2, mode="asymmetric",
+                                   graph_conv_flag=False)
         self.graph_generator = GraphGenerator(mpnn_dev, **mpnn_opts["graph_params"])
 
     def forward(self, x):
-        z = self.backbone(x).flatten(1)
-        z_cnn = z.clone()
-        edge_attr, edge_index, z = self.graph_generator.get_graph(z)
-        if self.v2:
-            z = self.gnn(z, edge_index.t().contiguous())
+        if "gat" in self.gnn_type:
+            z = self.backbone(x).flatten(1)
+            z_cnn = z.clone()
+            edge_attr, edge_index, z = self.graph_generator.get_graph(z)
         else:
+            z = self.backbone(x)
+            z_cnn = z.clone().flatten(1)
+        if self.gnn_type == "gat_v2":
+            z = self.gnn(z, edge_index.t().contiguous())
+        elif self.gnn_type == "gat":
             _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        elif self.gnn_type == "latentgnn":
+            z = self.gnn(z)
+            z = z.flatten(1)
         return z_cnn, z
 
 
@@ -72,7 +84,7 @@ class CLRGAT(pl.LightningModule):
                  mpnn_opts: dict,
                  mpnn_dev: str,
                  img_orig_size: Iterable,
-                 gat_v2: bool = False,
+                 gnn_type: str = "gat",
                  optim: str = 'adam',
                  dataset='omniglot',
                  weight_decay=0.01,
@@ -128,10 +140,7 @@ class CLRGAT(pl.LightningModule):
 
         self.dim = in_dim
         if mpnn_opts["_use"]:
-            if gat_v2:
-                self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, v2=True)
-            elif not gat_v2:
-                self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts)
+            self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type)
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
