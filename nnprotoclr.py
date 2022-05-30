@@ -235,7 +235,6 @@ class NNProtoCLR(pl.LightningModule):
             z = self.model(x).flatten(1)
         z = self.projection_head(z)
         p = self.prediction_head(z)
-        z = z.detach()
         return z, p
 
     def training_step(self, batch, batch_idx):
@@ -302,23 +301,24 @@ class NNProtoCLR(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
         self.eval()
-        if self.mpnn_opts["adapt"] == "instance":
-            # TODO: change instance to include both x_a_i and x_b_i
-            combined = torch.cat([x_a_i, x_b_i])
-            _, combined = self.mpnn_forward(combined)
-            z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
-        elif self.mpnn_opts["adapt"] == "ot":
-            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
-                                                     stopping_criterion=1e-4, device=self.device)
-            z_a_i = self.forward(x_a_i)
-            z_query = self.forward(x_b_i)
-            z_a_i, _ = transportation_module(z_a_i, z_query)
-        elif self.mpnn_opts["adapt"] == "re_rep":
-            combined = torch.cat([x_a_i, x_b_i])
-            _, z = self.mpnn_forward(combined)
-            z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
+        if self.mpnn_opts["_use"]:
+            if self.mpnn_opts["adapt"] == "instance":
+                # TODO: change instance to include both x_a_i and x_b_i
+                combined = torch.cat([x_a_i, x_b_i])
+                _, combined = self.mpnn_forward(combined)
+                z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
+            elif self.mpnn_opts["adapt"] == "ot":
+                transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                         stopping_criterion=1e-4, device=self.device)
+                z_a_i = self.forward(x_a_i)
+                z_query = self.forward(x_b_i)
+                z_a_i, _ = transportation_module(z_a_i, z_query)
+            elif self.mpnn_opts["adapt"] == "re_rep":
+                combined = torch.cat([x_a_i, x_b_i])
+                _, z = self.mpnn_forward(combined)
+                z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
         else:
-            z_a_i = self.model.backbone(x_a_i).flatten(1)
+            z_a_i = self.model(x_a_i).flatten(1)
         self.train()
 
         input_dim = z_a_i.shape[1]
@@ -373,19 +373,19 @@ class NNProtoCLR(pl.LightningModule):
                     z_batch = torch.cat([z_batch, augs(z_batch)])
                     y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
-                # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
-                if self.mpnn_opts["adapt"] == "instance":
-                    # lets use the entire query set?
-                    combined = torch.cat([z_batch, x_b_i])
-                    _, combined = self.mpnn_forward(combined)
-                    output, _ = combined.split([len(z_batch), len(x_b_i)])
-                elif self.mpnn_opts["adapt"] == "re_rep":
-                    combined = torch.cat([z_batch, x_b_i])
-                    _, combined = self.mpnn_forward(combined)
-                    output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2,
-                                                  self.re_rep_temp)
+                if self.mpnn_opts["_use"]:
+                    if self.mpnn_opts["adapt"] == "instance":
+                        # lets use the entire query set?
+                        combined = torch.cat([z_batch, x_b_i])
+                        _, combined = self.mpnn_forward(combined)
+                        output, _ = combined.split([len(z_batch), len(x_b_i)])
+                    elif self.mpnn_opts["adapt"] == "re_rep":
+                        combined = torch.cat([z_batch, x_b_i])
+                        _, combined = self.mpnn_forward(combined)
+                        output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2,
+                                                      self.re_rep_temp)
                 else:
-                    output = self.model.backbone(z_batch).flatten(1)
+                    output = self.model(z_batch).flatten(1)
 
                 preds = classifier(output)
                 loss = loss_fn(preds, y_batch)
@@ -404,13 +404,15 @@ class NNProtoCLR(pl.LightningModule):
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
-        if self.mpnn_opts["adapt"] == "instance":
+        if self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "instance":
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
             # todo: check if there needs to be a weight norm applied for the final classification?
-        else:
+        elif self.mpnn_opts["_use"]:
             _, output = self.mpnn_forward(x_b_i)
+        else:
+            output = self.model(x_b_i).flatten(1)
         scores = classifier(output)
 
         loss = F.cross_entropy(scores, y_query, reduction='mean')
