@@ -91,7 +91,9 @@ def tune_nnclr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/
         num_samples=num_samples,
         scheduler=scheduler,
         progress_reporter=reporter,
-        name="tune_nnclr_pbt")
+        name="tune_nnclr_pbt",
+        local_dir="./ray_results/"
+    )
 
     print("Best hyperparameters found were: ", analysis.best_config)
 
