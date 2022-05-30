@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  gat_v2: True
+  gnn_type: latentgnn
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
@@ -33,13 +33,13 @@ model:
       set_negative: "hard"
     gnn_params:
       pretrained_path: "no"
-      red: 1
+      red: 0
       cat: 0
       every: 0
       gnn:
-        num_layers: 2 # for gatv2
+        num_layers: 1 # for gatv2
         aggregator: "add"
-        num_heads: 1
+        num_heads: 2
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -51,17 +51,18 @@ model:
         dropout_2: 0.1
         mult_attr: 0
       classifier:
-        neck: 1
+        neck: 0
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
   feature_extractor:
-    class_path: feature_extractors.feature_extractor.CNN_4Layer
+    class_path: feature_extractors.feature_extractor.ConvNet
     init_args:
-      global_pooling: False
-      in_channels: 3
-      final_maxpool: True
-      ada_maxpool: False
+      opt:
+        in_planes: 3
+        out_planes: 64
+        num_stages: 4
+        average_end: False
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5

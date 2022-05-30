@@ -23,7 +23,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: re_rep
+    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -36,7 +36,7 @@ model:
       cat: 0
       every: 0
       gnn:
-        num_layers: 1
+        num_layers: 2 # for gatv2
         aggregator: "add"
         num_heads: 1
         attention: "dot"

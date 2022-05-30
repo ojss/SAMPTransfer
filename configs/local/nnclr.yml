@@ -3,9 +3,9 @@ model:
   arch: conv4
   conv_4_out_planes: 64
   projection_out_dim: 128
-  data_path: ../data/miniimagenet_84
+  data_path: /home/ojass/projects/data/miniimagenet_84
   input_size: 84
-  bsize: 128
+  bsize: 64
   num_workers: 1
   lr: 0.025118864315095822
   optimiser: adam
@@ -14,21 +14,21 @@ model:
 data:
   data_path: ${model.data_path}
   input_size: 84
-  bsize: 128
-  num_workers: 1
+  bsize: 64
+  num_workers: 0
 
 trainer:
-  gpus: 0
+  gpus: -1
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 50
   check_val_every_n_epoch: 24
-  logger:
-    class_path: pytorch_lightning.loggers.WandbLogger
-    init_args:
-      project: test
-      save_dir: wandb_logs
-      log_model: True
+#  logger:
+#    class_path: pytorch_lightning.loggers.WandbLogger
+#    init_args:
+#      project: test
+#      save_dir: wandb_logs
+#      log_model: True
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
