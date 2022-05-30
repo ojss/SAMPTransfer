@@ -14,6 +14,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from PIL import Image, ImageFilter, ImageOps
+from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
 from torchmeta.datasets.helpers import (omniglot, miniimagenet, tieredimagenet,
@@ -214,7 +215,11 @@ class UnlabelledDataset(Dataset):
         else:
             with h5py.File(os.path.join(datapath, split + '_data.hdf5'), 'r') as f:
                 datasets = f['datasets']
+                class_names = list(datasets.keys())
                 classes = [datasets[k][()] for k in datasets.keys()]
+                labels = [np.repeat([i], len(datasets[k][()])) for i, k in enumerate(class_names)]
+                labels = np.array(labels).flatten()
+            self.targets = LabelEncoder().fit_transform(labels)
 
         # Optionally filter out some classes
         if n_classes is not None:
@@ -233,6 +238,7 @@ class UnlabelledDataset(Dataset):
             image = Image.open(io.BytesIO(self.data[index])).convert('RGB')
         else:
             image = Image.fromarray(self.data[index])
+        target = self.targets[index]
 
         view_list = []
         originals = []
@@ -250,7 +256,8 @@ class UnlabelledDataset(Dataset):
                 assert self.n_query == 1
                 view_list.append(self.original_transform(image).unsqueeze(0))
 
-        return dict(origs=torch.cat(originals), views=torch.cat(view_list))
+        return dict(origs=torch.cat(originals), views=torch.cat(view_list),
+                    labels=np.repeat(target, self.n_support + self.n_query))
 
 
 # Cell
