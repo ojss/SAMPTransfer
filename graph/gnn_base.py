@@ -5,7 +5,6 @@ from torch_scatter import scatter_mean
 
 from .attentions import MultiHeadDotProduct
 from .utils import *
-from .equilibirium import SuperMLP
 
 logger = logging.getLogger('GNNReID.GNNModule')
 
@@ -62,10 +61,12 @@ class GNNReID(nn.Module):
         self.dev = dev
         self.params = params
         self.gnn_params = params['gnn']
-
-        self.dim_red = nn.Linear(embed_dim, int(embed_dim / params['red']))
-        logger.info("Embed dim old {}, new".format(embed_dim, embed_dim / params['red']))
-        embed_dim = int(embed_dim / params['red'])
+        if params['red'] == 0:
+            self.dim_red = nn.Identity()
+        else:
+            self.dim_red = nn.Linear(embed_dim, int(embed_dim / params['red']))
+        logger.info("Embed dim old {}, new".format(embed_dim, embed_dim / (params['red'] + 1e-7)))
+        embed_dim = int(embed_dim / params['red']) if params['red'] != 0 else embed_dim
         logger.info("Embed dim {}".format(embed_dim))
 
         self.gnn_model = self._build_GNN_Net(embed_dim=embed_dim)
