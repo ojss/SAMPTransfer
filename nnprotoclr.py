@@ -272,9 +272,11 @@ class NNProtoCLR(pl.LightningModule):
 
         z, _ = self.forward(torch.cat([x_support, x_query]))
         z_support, z_query = z.split([ways * self.n_support, ways * self.n_query])
-        z_support = self.memory_bank(z_support, update=False)
-        # z_query = F.normalize(z_query, dim=1)
+        z_support_nn = self.memory_bank(z_support.clone(), update=True)
         loss, acc = self.calculate_protoclr_loss(torch.cat([z_support, z_query]), y_support, y_query, ways=ways)
+        loss_nn, acc_nn = self.calculate_protoclr_loss(torch.cat([z_support_nn, z_query]), y_support, y_query,
+                                                       ways=ways)
+        loss += loss_nn
         self.log_dict(dict(train_loss=loss.item(), train_acc=acc), on_epoch=True, on_step=True, prog_bar=True)
         return loss
 
