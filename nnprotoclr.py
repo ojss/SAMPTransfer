@@ -128,7 +128,7 @@ class NNProtoCLR(pl.LightningModule):
             self.prediction_head = nn.Identity()
 
         # queue
-        self.memory_bank = NNMemoryBankModule(size=65536)
+        self.memory_bank = NNMemoryBankModule(size=8192)
         self.automatic_optimization = True
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
@@ -270,13 +270,16 @@ class NNProtoCLR(pl.LightningModule):
         y_support = y_support.repeat(batch_size, 1, self.n_support)
         y_support = y_support.view(batch_size, -1).to(self.device)
 
-        z, _ = self.forward(torch.cat([x_support, x_query]))
-        z_support, z_query = z.split([ways * self.n_support, ways * self.n_query])
-        z_support_nn = self.memory_bank(z_support.clone(), update=False)
-        z_query_nn = self.memory_bank(z_query.clone(), update=True)
-        loss, acc = self.calculate_protoclr_loss(torch.cat([z_support, z_query_nn]), y_support, y_query, ways=ways)
-        loss_nn, _ = self.calculate_protoclr_loss(torch.cat([z_support_nn, z_query]), y_support, y_query, ways=ways)
-        loss += loss_nn
+        z, p = self.forward(torch.cat([x_support, x_query]))
+        z0, z1 = z.split([ways * self.n_support, ways * self.n_query])
+        p0, p1 = p.split([ways * self.n_support, ways * self.n_query])
+        z0 = self.memory_bank(z0, update=False)
+        z1 = self.memory_bank(z1, update=True)
+        loss1, acc1 = self.calculate_protoclr_loss(torch.cat([z0, p1]), y_support, y_query, ways=ways)
+        loss2, acc2 = self.calculate_protoclr_loss(torch.cat([p0, z1]), y_support, y_query, ways=ways)
+        loss = 0.5 * (loss1 + loss2)
+        acc = 0.5 * (acc1 + acc2)
+
         self.log_dict(dict(train_loss=loss.item(), train_acc=acc), on_epoch=True, on_step=True, prog_bar=True)
         return loss
 
