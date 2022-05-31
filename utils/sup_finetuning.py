@@ -1,7 +1,10 @@
+import copy
+
 import einops
 import numpy as np
 import torch
 import torch.nn.functional as F
+from pytorch_metric_learning import losses
 from torch import nn
 from torch.autograd import Variable
 from torchmetrics.functional import accuracy
@@ -177,3 +180,63 @@ def supervised_finetuning(encoder, episode, device='cpu', proto_init=True,
     # acc = torch.mean(predictions.eq(y_query).float())
     acc = accuracy(predictions, y_query)
     return loss, acc.item()
+
+
+@torch.enable_grad()
+def proto_maml(self, batch, batch_idx):
+    x_support = batch['train'][0][0]  # only take data & only first batch
+    x_support = x_support.to(self.device)
+    x_support_var = Variable(x_support)
+    x_query = batch['test'][0][0]  # only take data & only first batch
+    x_query = x_query.to(self.device)
+    x_query_var = Variable(x_query)
+    n_support = x_support.shape[0] // self.eval_ways
+    n_query = x_query.shape[0] // self.eval_ways
+
+    batch_size = self.eval_ways
+    support_size = self.eval_ways * n_support
+    y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
+    y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
+
+    self.eval()
+    _, z = self.mpnn_forward(torch.cat([x_support_var, x_query_var]))
+    z_supp, _ = z.split([len(x_support), len(x_query)])
+    classifier = Classifier(z_supp.shape[-1], self.eval_ways)
+    classifier.init_params_from_prototypes(z_support=z_supp, n_way=self.eval_ways, n_support=n_support)
+    classifier.to(self.device)
+    ce_loss = nn.CrossEntropyLoss().to(self.device)
+    sup_con_loss = losses.SupConLoss()
+    local_model = copy.deepcopy(self.model)
+    local_model.train()
+    classifier.train()
+    if not self.ft_freeze_backbone:
+        # Only freeze the CNN backbone
+        local_model.backbone.requires_grad_(False)
+        local_model.gnn.requires_grad_(True)
+    # TODO: should I use another projector layer here instead of touching the GAT?
+    backbone_parameters = list(filter(lambda p: p.requires_grad, local_model.parameters()))
+    classifier_params = list(classifier.parameters())
+    delta_opt = torch.optim.Adam(backbone_parameters, lr=self.lr, weight_decay=self.weight_decay)
+    classifier_opt = torch.optim.Adam(classifier_params, lr=self.sup_finetune_lr, weight_decay=self.weight_decay)
+
+    for _ in range(self.sup_finetune_epochs):
+        # MAML inner loop
+        delta_opt.zero_grad()
+        classifier_opt.zero_grad()
+        _, outputs = local_model(torch.cat([x_support_var, x_query_var]))
+        outputs, _ = outputs.split([len(x_support), len(x_query)])
+        preds = classifier(outputs)
+        loss1 = ce_loss(preds, y_supp)
+        loss2 = sup_con_loss(outputs, y_supp)
+        loss = loss1 + loss2
+        loss.backward()
+        delta_opt.step()
+        classifier_opt.step()
+    _, outputs = local_model(x_query_var)
+    scores = classifier(outputs)
+    loss = F.cross_entropy(scores, y_query, reduction="mean") + sup_con_loss(outputs, y_query, )
+    _, predictions = torch.max(scores, dim=1)
+    # run local_model on query points
+    acc = accuracy(predictions, y_query)
+
+    return loss, acc
