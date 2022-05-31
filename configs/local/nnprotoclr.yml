@@ -9,7 +9,8 @@ model:
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   use_projector: False
-  use_prediction_head: False
+  use_prediction_head: True
+  projection_out_dim: 1600
   eta_min: 5e-5
   lr: 1e-3
   lr_decay_step: 25000
