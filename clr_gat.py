@@ -530,7 +530,7 @@ class CLRGAT(pl.LightningModule):
             y_query, y_query_pred = self.lab_cleaning(batch, batch_idx)
             y_query, y_query_pred = [torch.Tensor(t) for t in [y_query, y_query_pred]]
             acc = accuracy(y_query_pred.long(), y_query.long())
-            loss = 0.  # because idk?
+            loss = torch.tensor(0.)  # because idk?
         elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = self.std_proto_form(batch, batch_idx)
