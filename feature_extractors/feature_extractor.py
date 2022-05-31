@@ -503,11 +503,6 @@ def FeatureExtractor(arch, opts):
         return resnet_extractor, resnet_extractor.num_channels
 
 
-import math
-
-import torch.nn as nn
-
-
 class ConvBlock(nn.Module):
     def __init__(self, in_planes, out_planes, relu=True, pool=True):
         super().__init__()
