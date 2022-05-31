@@ -72,6 +72,7 @@ trainer:
   max_epochs: 1500
   limit_train_batches: 100
   limit_val_batches: 15
+  limit_test_batches: 600
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
     init_args:
