@@ -35,7 +35,8 @@ from utils.label_cleansing import label_finetuning
 
 
 class GNN(nn.Module):
-    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat"):
+    def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat",
+                 final_relu: bool = False):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
@@ -55,6 +56,11 @@ class GNN(nn.Module):
                                    graph_conv_flag=False)
         self.graph_generator = GraphGenerator(mpnn_dev, **mpnn_opts["graph_params"])
 
+        if final_relu:
+            self.relu_final = nn.ReLU()
+        else:
+            self.relu_final = nn.Identity()
+
     def forward(self, x):
         if "gat" in self.gnn_type:
             z = self.backbone(x).flatten(1)
@@ -70,6 +76,7 @@ class GNN(nn.Module):
         elif self.gnn_type == "latentgnn":
             z = self.gnn(z)
             z = z.flatten(1)
+        z = self.relu_final(z)
         return z_cnn, z
 
 
@@ -144,7 +151,8 @@ class CLRGAT(pl.LightningModule):
 
         self.dim = in_dim
         if mpnn_opts["_use"]:
-            self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type)
+            self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type,
+                             final_relu=self.label_cleansing_opts["use"])
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
@@ -152,6 +160,10 @@ class CLRGAT(pl.LightningModule):
                 self.gnn_loss = F.cross_entropy
         else:
             self.model = backbone
+        # TODO: this way is better I think, to try again
+        # if self.label_cleansing_opts["use"]:
+        #     self.model.add_module("final_relu", nn.ReLU())
+        breakpoint()
 
         self.automatic_optimization = True
 

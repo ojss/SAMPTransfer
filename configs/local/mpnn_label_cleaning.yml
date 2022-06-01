@@ -18,6 +18,7 @@ model:
   n_support: ${data.n_support}
   n_query: ${data.n_query}
   label_cleansing_opts:
+    use: True
     n_test_runs: 1000
     n_ways: 5
     n_shots: 5
@@ -35,9 +36,9 @@ model:
     best_samples: 3 # number of best samples per class chosen for pseudolabels
     semi_inference_method: transductive # ['transductive', 'inductive']
     sinkhorn_iter: 1
-    use_pt: False # [True, False]
+    use_pt: True # [True, False]
   mpnn_loss_fn: ce
-  mpnn_dev: cuda
+  mpnn_dev: cpu
   mpnn_opts:
     _use: True
     loss_cnn: True
@@ -51,7 +52,7 @@ model:
       set_negative: "hard"
     gnn_params:
       pretrained_path: "no"
-      red: 0
+      red: 1
       cat: 0
       every: 0
       gnn:
@@ -82,7 +83,7 @@ model:
         num_stages: 4
         average_end: False
 trainer:
-  gpus: -1
+  gpus: 0
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
@@ -112,10 +113,10 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-  #  full_size_path: ../data/processed_images
+  datapath: ../data/
+#  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+#  full_size_path: /home/ojass/projects/data/processed_images/
+  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
   batch_size: 64
