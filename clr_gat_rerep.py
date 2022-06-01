@@ -57,7 +57,7 @@ class CLRGATREP(pl.LightningModule):
                  mode='trainval',
                  eval_ways=5,
                  sup_finetune="prototune",
-                 prototune_use_augs= False,
+                 prototune_use_augs=False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
@@ -412,7 +412,7 @@ class CLRGATREP(pl.LightningModule):
         elif self.mpnn_opts["adapt"] == "re_rep":
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
-            _, output = self.re_represent(combined, len(x_b_i), self.alpha1, self.alpha2, self.re_rep_temp)
+            _, output = self.re_represent(combined, len(x_a_i), self.alpha1, self.alpha2, self.re_rep_temp)
         else:
             _, output = self.mpnn_forward(x_b_i)
         scores = classifier(output)
