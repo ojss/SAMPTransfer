@@ -163,7 +163,6 @@ class CLRGAT(pl.LightningModule):
         # TODO: this way is better I think, to try again
         # if self.label_cleansing_opts["use"]:
         #     self.model.add_module("final_relu", nn.ReLU())
-        breakpoint()
 
         self.automatic_optimization = True
 
