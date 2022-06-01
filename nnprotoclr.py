@@ -4,6 +4,7 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple
 
+import einops
 import kornia as K
 import numpy as np
 import pl_bolts.optimizers
@@ -39,6 +40,7 @@ class NNProtoCLR(pl.LightningModule):
                  mpnn_dev: str,
                  img_orig_size: Iterable,
                  gnn_type: str,
+                 queue_size: int,
                  n_support: int = 1,
                  n_query: int = 3,
                  use_projector: bool = True,
@@ -102,6 +104,8 @@ class NNProtoCLR(pl.LightningModule):
 
         self.img_orig_size = img_orig_size
 
+        self.queue_size = queue_size
+
         self.mpnn_opts = mpnn_opts
         _, emb_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
         if mpnn_opts["_use"]:
@@ -128,8 +132,50 @@ class NNProtoCLR(pl.LightningModule):
             self.prediction_head = nn.Identity()
 
         # queue
-        self.memory_bank = NNMemoryBankModule(size=8192)
+        self.register_buffer("queue", torch.randn(self.queue_size, projection_out_dim))
+        self.register_buffer("queue_y", -torch.ones(self.queue_size, dtype=torch.long))  # idc about this right now
+        self.queue = F.normalize(self.queue, dim=1)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
         self.automatic_optimization = True
+
+    @torch.no_grad()
+    def dequeue_and_enqueue(self, z: torch.Tensor, y: torch.Tensor):
+        """Adds new samples and removes old samples from the queue in a fifo manner. Also stores
+        the labels of the samples.
+
+        Args:
+            z (torch.Tensor): batch of projected features.
+            y (torch.Tensor): labels of the samples in the batch.
+        """
+        # TODO: handle distributed mode
+
+        batch_size = z.shape[0]
+
+        ptr = int(self.queue_ptr)  # type: ignore
+        assert self.queue_size % batch_size == 0
+
+        self.queue[ptr: ptr + batch_size, :] = z
+        self.queue_y[ptr: ptr + batch_size] = y  # type: ignore
+        ptr = (ptr + batch_size) % self.queue_size
+
+        self.queue_ptr[0] = ptr  # type: ignore
+
+    @torch.no_grad()
+    def find_nn(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Finds the nearest neighbor of a sample.
+
+        Args:
+            z (torch.Tensor): a batch of projected features.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                indices and projected features of the nearest neighbors.
+        """
+
+        idx = (z @ self.queue.T).max(dim=1)[1]
+        nearest_neighbour = self.queue[idx]
+        return idx, nearest_neighbour
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
         loss_cnn = 0.
@@ -241,6 +287,7 @@ class NNProtoCLR(pl.LightningModule):
         acc = 0.
         data = batch['origs']
         views = batch['views']
+        supp_true_labels = batch['labels'][:, 0]
         data = data.unsqueeze(0)
         # e.g. 50 images, 2 support, 2 query, miniImageNet: torch.Size([1, 50, 4, 3, 84, 84])
         batch_size = data.size(0)
@@ -269,18 +316,23 @@ class NNProtoCLR(pl.LightningModule):
             0).unsqueeze(2)  # batch and shot dim
         y_support = y_support.repeat(batch_size, 1, self.n_support)
         y_support = y_support.view(batch_size, -1).to(self.device)
+        z, _ = self.forward(torch.cat([x_support, x_query]))
+        z = F.normalize(z, dim=-1)
+        z_support, z_query = z.split([ways * self.n_support, ways * self.n_query])
 
-        z, p = self.forward(torch.cat([x_support, x_query]))
-        z0, z1 = z.split([ways * self.n_support, ways * self.n_query])
-        p0, p1 = p.split([ways * self.n_support, ways * self.n_query])
-        z0 = self.memory_bank(z0, update=False)
-        z1 = self.memory_bank(z1, update=True)
-        loss1, acc1 = self.calculate_protoclr_loss(torch.cat([z0, p1]), y_support, y_query, ways=ways)
-        loss2, acc2 = self.calculate_protoclr_loss(torch.cat([p0, z1]), y_support, y_query, ways=ways)
-        loss = 0.5 * (loss1 + loss2)
-        acc = 0.5 * (acc1 + acc2)
+        idx1, nn1 = self.find_nn(z_support)
+        targets = supp_true_labels[: ways * self.n_support]
+        nn1 = einops.rearrange(nn1, "b e -> 1 b e")
+        z_query = einops.rearrange(z_query, "b e -> 1 b e")
+        loss_nn, acc_nn = prototypical_loss(nn1, z_query, y_query, distance=self.distance)
+        nn_acc = (targets == self.queue_y[idx1]).sum() / targets.size(0)
 
-        self.log_dict(dict(train_loss=loss.item(), train_acc=acc), on_epoch=True, on_step=True, prog_bar=True)
+        self.dequeue_and_enqueue(z_support, targets)
+        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
+        loss += loss_nn
+        self.log_dict(dict(train_loss=loss.item(), train_acc=acc, proto_nn_loss=loss_nn,
+                           proto_nn_acc=acc_nn, train_nn_acc=nn_acc), on_epoch=True, on_step=True,
+                      prog_bar=True)
         return loss
 
     @torch.enable_grad()
@@ -299,8 +351,7 @@ class NNProtoCLR(pl.LightningModule):
         batch_size = n_way
         support_size = n_way * n_support
 
-        y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(
-            self.device)  # (25,)
+        y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(self.device)  # (25,)
         y_b_i = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
         x_b_i = x_query_var
