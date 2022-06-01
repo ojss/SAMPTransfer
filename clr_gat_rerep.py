@@ -4,6 +4,7 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple
 
+import einops
 import kornia as K
 import numpy as np
 import pl_bolts.optimizers
@@ -22,7 +23,7 @@ from tqdm.auto import tqdm
 from clr_gat import GNN
 from dataloaders import UnlabelledDataModule
 from proto_utils import (get_prototypes,
-                         prototypical_loss)
+                         prototypical_loss, euclidean_distance)
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
@@ -42,6 +43,7 @@ class CLRGATREP(pl.LightningModule):
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  mpnn_dev: str,
+                 pretrain_re_rep: bool,
                  img_orig_size: Iterable,
                  optim: str = 'adam',
                  dataset='omniglot',
@@ -55,14 +57,14 @@ class CLRGATREP(pl.LightningModule):
                  mode='trainval',
                  eval_ways=5,
                  sup_finetune="prototune",
-                 prototune_use_augs=False,
+                 prototune_use_augs= False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
                  finetune_batch_norm=False,
-                 alpha1=.3,
-                 alpha2=.3,
-                 re_rep_temp=0.07):
+                 alpha1: float = .3,
+                 alpha2: float = .3,
+                 re_rep_temp: float = 0.07):
         super().__init__()
         self.save_hyperparameters()
         backbone = feature_extractor
@@ -72,6 +74,7 @@ class CLRGATREP(pl.LightningModule):
         self.n_support = n_support
         self.n_query = n_query
         self.distance = distance
+        self.pretrain_re_rep = pretrain_re_rep
 
         self.weight_decay = weight_decay
         self.optim = optim
@@ -130,18 +133,21 @@ class CLRGATREP(pl.LightningModule):
 
     @staticmethod
     def re_represent(z: torch.Tensor, n_support: int,
-                     alpha1: float, alpha2: float, t: float):
+                     alpha1: float, alpha2: float, t: float) -> Tuple[torch.Tensor, torch.Tensor]:
         # being implemented with training shapes in mind
         # TODO: check if the same code works for testing shapes or requires some squeezing
         z_support = z[: n_support, :]
         z_query = z[n_support:, :]
-        D = torch.cdist(z_query, z_query).pow(2)
+        D = euclidean_distance(z_query.unsqueeze(0), z_query.unsqueeze(0)).squeeze(0)
+        # D = torch.cdist(z_query, z_query).pow(2)
         A = F.softmax(t * D, dim=-1)
         scaled_query = (A.unsqueeze(-1) * z_query).sum(1)  # weighted sum of all query features
         z_query = (1 - alpha1) * z_query + alpha1 * scaled_query
 
         # Use re-represented query set to propagate information to the support set
-        D = torch.cdist(z_support, z_query).pow(2)
+        z_query = z_query.squeeze(0)
+        D = euclidean_distance(z_support.unsqueeze(0), z_query.unsqueeze(0)).squeeze(0)
+        # D = torch.cdist(z_support, z_query).pow(2)
         A = F.softmax(t * D, dim=-1)
         scaled_query = (A.unsqueeze(-1) * z_query).sum(1)
         z_support = (1 - alpha2) * z_support + alpha2 * scaled_query
@@ -257,8 +263,17 @@ class CLRGATREP(pl.LightningModule):
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
-
         loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
+        if self.pretrain_re_rep:
+            # don't care about z_query - z_query info should be in z_support
+            z_support_rr, _ = self.re_represent(z.clone(), ways * self.n_support,
+                                                self.alpha1, self.alpha2, self.re_rep_temp)
+            z_support_rr = einops.rearrange(z_support_rr, "b e -> 1 b e")
+            z_support = z[:ways * self.n_support]
+            z_support = einops.rearrange(z_support, "b e -> 1 b e")
+            l, a = prototypical_loss(z_support, z_support_rr, y_support)
+            self.log_dict(dict(rrl=l, rra=a), on_epoch=True, on_step=True)
+            loss += l
 
         self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
 
@@ -324,7 +339,7 @@ class CLRGATREP(pl.LightningModule):
                                                                    sigma=(0.1, 2.0)))
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
-            classifier.init_params_from_prototypes(z_a_i, n_way, n_support,)
+            classifier.init_params_from_prototypes(z_a_i, n_way, n_support, )
         classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(
@@ -365,6 +380,7 @@ class CLRGATREP(pl.LightningModule):
                     _, combined = self.mpnn_forward(combined)
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
                 elif self.mpnn_opts["adapt"] == "re_rep":
+                    # TODO: a projector may help here?
                     combined = torch.cat([z_batch, x_b_i])
                     _, combined = self.mpnn_forward(combined)
                     output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2, self.re_rep_temp)
@@ -393,6 +409,10 @@ class CLRGATREP(pl.LightningModule):
             _, combined = self.mpnn_forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
             # todo: check if there needs to be a weight norm applied for the final classification?
+        elif self.mpnn_opts["adapt"] == "re_rep":
+            combined = torch.cat([x_a_i, x_b_i])
+            _, combined = self.mpnn_forward(combined)
+            _, output = self.re_represent(combined, len(x_b_i), self.alpha1, self.alpha2, self.re_rep_temp)
         else:
             _, output = self.mpnn_forward(x_b_i)
         scores = classifier(output)
@@ -419,8 +439,6 @@ class CLRGATREP(pl.LightningModule):
                 device=self.device,
                 n_way=self.eval_ways,
                 use_augs=self.prototune_use_augs)
-        elif self.sup_finetune == "proto_maml":
-            loss, acc = self.proto_maml(batch, batch_idx)
         elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = std_proto_form(self, batch, batch_idx)

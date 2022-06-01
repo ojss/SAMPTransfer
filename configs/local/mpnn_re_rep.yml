@@ -7,7 +7,6 @@ model:
   sup_finetune_lr: 0.0001563663718906821
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
-  use_projector: True
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -17,8 +16,11 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  pretrain_re_rep: True
+  alpha1: 0.5
+  alpha2: 0.5
   mpnn_loss_fn: ce
-  mpnn_dev: cuda
+  mpnn_dev: cpu
   mpnn_opts:
     _use: True
     loss_cnn: True
@@ -62,7 +64,7 @@ model:
       final_maxpool: True
       ada_maxpool: False
 trainer:
-  gpus: -1
+  gpus: 0
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
@@ -91,10 +93,10 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-  #  full_size_path: ../data/processed_images
+  datapath: ../data/
+  #  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  #  full_size_path: /home/ojass/projects/data/processed_images/
+  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
   batch_size: 64

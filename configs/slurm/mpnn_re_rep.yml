@@ -6,7 +6,7 @@ model:
   warmup_epochs: 250
   sup_finetune_lr: ${model.lr}
   sup_finetune: prototune # [prototune, std_proto, proto_maml]
-  ft_freeze_backbone: False
+  ft_freeze_backbone: True
   prototune_use_augs: False
   sup_finetune_epochs: 15 # 15 for prototune
   eta_min: 5e-5
@@ -18,6 +18,9 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  pretrain_re_rep: True
+  alpha1: 0.5
+  alpha2: 0.5
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
