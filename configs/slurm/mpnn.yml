@@ -22,6 +22,26 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  label_cleansing_opts:
+    use: False
+    n_test_runs: 1000
+    n_ways: 5
+    n_shots: 5
+    n_queries: 15
+    unbalanced: False
+    reduce: null # ['isomap', 'itsa', 'mds', 'lle', 'se', 'pca', 'none']
+    inference_semi: transductive # ['transductive', 'inductive', 'inductive_sk']
+    d: 5
+    alpha: 0.8
+    K: 20 # neighbours used for manifold creation
+    T: 3 # power to raise probs matrix before sinkhorn algorithm
+    lr: 0.00001 # learning rate of fine-tuning
+    denoising_iterations: 1000
+    beta_pt: 0.5 # power transform power
+    best_samples: 3 # number of best samples per class chosen for pseudolabels
+    semi_inference_method: transductive # ['transductive', 'inductive']
+    sinkhorn_iter: 1
+    use_pt: False # [True, False]
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:

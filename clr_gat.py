@@ -32,6 +32,7 @@ from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
 from utils.label_cleansing import label_finetuning
+from utils.rerepresentation import re_represent
 
 
 class GNN(nn.Module):
@@ -581,7 +582,8 @@ class CLRGAT(pl.LightningModule):
         y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
         y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
         z = self.forward(torch.cat([x_support_var, x_query_var]))
-        support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
+        support_features, query_features = re_represent(z, support_size, .5, .5, .07)
+        # support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
         self.label_cleansing_opts["n_ways"] = self.eval_ways
         y_query, y_query_pred = label_finetuning(self.label_cleansing_opts, support_features, y_supp, y_query,
                                                  query_features)
