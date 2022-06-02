@@ -4,7 +4,6 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple
 
-import einops
 import kornia as K
 import numpy as np
 import pl_bolts.optimizers
@@ -13,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from deepspeed.ops.adam import FusedAdam
-from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead, NNMemoryBankModule
+from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
 from pytorch_metric_learning import losses
@@ -23,6 +22,7 @@ from tqdm.auto import tqdm
 
 from clr_gat import GNN
 from dataloaders import UnlabelledDataModule
+from misc.dino_utils import get_rank
 from proto_utils import get_prototypes, prototypical_loss
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
@@ -41,6 +41,7 @@ class NNProtoCLR(pl.LightningModule):
                  img_orig_size: Iterable,
                  gnn_type: str,
                  queue_size: int,
+                 temperature: float = 0.1,
                  n_support: int = 1,
                  n_query: int = 3,
                  use_projector: bool = True,
@@ -88,6 +89,7 @@ class NNProtoCLR(pl.LightningModule):
         self.lr_decay_step = lr_decay_step
         self.n_support = n_support
         self.n_query = n_query
+        self.temperature = temperature
 
         # PCLR Supfinetune
         self.mode = mode
@@ -276,12 +278,40 @@ class NNProtoCLR(pl.LightningModule):
 
     def forward(self, x):
         if self.mpnn_opts["_use"]:
-            _, z = self.model(x)
+            _, y = self.model(x)
         else:
-            z = self.model(x).flatten(1)
+            y = self.model(x).flatten(1)
+        z = y.clone()
         z = self.projection_head(z)
         p = self.prediction_head(z)
-        return z, p
+        return y, z, p
+
+    def nnclr_loss_func(self, nn: torch.Tensor, p: torch.Tensor, temperature: float = 0.1) -> torch.Tensor:
+        """Computes NNCLR's loss given batch of nearest-neighbors nn from view 1 and
+        predicted features p from view 2.
+
+        Args:
+            nn (torch.Tensor): NxD Tensor containing nearest neighbors' features from view 1.
+            p (torch.Tensor): NxD Tensor containing predicted features from view 2
+            temperature (float, optional): temperature of the softmax in the contrastive loss. Defaults
+                to 0.1.
+
+        Returns:
+            torch.Tensor: NNCLR loss.
+        """
+
+        nn = F.normalize(nn, dim=-1)
+        p = F.normalize(p, dim=-1)
+        # to be consistent with simclr, we now gather p
+        # this might result in suboptimal results given previous parameters.
+
+        logits = nn @ p.T / temperature
+
+        rank = get_rank()
+        n = nn.size(0)
+        labels = torch.arange(n * rank, n * (rank + 1), device=p.device)
+        loss = F.cross_entropy(logits, labels)
+        return loss
 
     def training_step(self, batch, batch_idx):
         acc = 0.
@@ -316,22 +346,25 @@ class NNProtoCLR(pl.LightningModule):
             0).unsqueeze(2)  # batch and shot dim
         y_support = y_support.repeat(batch_size, 1, self.n_support)
         y_support = y_support.view(batch_size, -1).to(self.device)
-        z, _ = self.forward(torch.cat([x_support, x_query]))
-        z = F.normalize(z, dim=-1)
-        z_support, z_query = z.split([ways * self.n_support, ways * self.n_query])
+        z_orig, z, p = self.forward(torch.cat([x_support, x_query]))
+        z1, z2 = z_orig.split([ways * self.n_support, ways * self.n_query])
+        z1 = F.normalize(z1, dim=-1)
+        z2 = F.normalize(z2, dim=-1)
+        p1, p2 = z.split([ways * self.n_support, ways * self.n_query])
 
-        idx1, nn1 = self.find_nn(z_support)
+        idx1, nn1 = self.find_nn(z1)
+        _, nn2 = self.find_nn(z2)
         targets = supp_true_labels[: ways * self.n_support]
-        nn1 = einops.rearrange(nn1, "b e -> 1 b e")
-        z_query = einops.rearrange(z_query, "b e -> 1 b e")
-        loss_nn, acc_nn = prototypical_loss(nn1, z_query, y_query, distance=self.distance)
-        nn_acc = (targets == self.queue_y[idx1]).sum() / targets.size(0)
 
-        self.dequeue_and_enqueue(z_support, targets)
-        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query, ways)
-        loss += loss_nn
-        self.log_dict(dict(train_loss=loss.item(), train_acc=acc, proto_nn_loss=loss_nn,
-                           proto_nn_acc=acc_nn, train_nn_acc=nn_acc), on_epoch=True, on_step=True,
+        loss = (self.nnclr_loss_func(nn1, p2, temperature=self.temperature) / 2
+                + self.nnclr_loss_func(nn2, p1, temperature=self.temperature) / 2
+                )
+
+        b = targets.size(0)
+        nn_acc = (targets == self.queue_y[idx1]).sum() / b
+
+        self.dequeue_and_enqueue(z1, targets)
+        self.log_dict(dict(train_loss=loss.item(), train_nn_acc=nn_acc), on_epoch=True, on_step=True,
                       prog_bar=True)
         return loss
 
