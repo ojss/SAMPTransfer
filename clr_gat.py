@@ -93,6 +93,9 @@ class CLRGAT(pl.LightningModule):
                  mpnn_dev: str,
                  img_orig_size: Iterable,
                  label_cleansing_opts: dict,
+                 use_projector: bool,
+                 projector_h_dim: int,
+                 projector_out_dim: int,
                  gnn_type: str = "gat",
                  optim: str = 'adam',
                  dataset='omniglot',
@@ -132,6 +135,10 @@ class CLRGAT(pl.LightningModule):
         self.lr_decay_rate = lr_decay_rate
         self.lr_decay_step = lr_decay_step
 
+        self.use_projector = use_projector
+        self.projector_h_dim = projector_h_dim
+        self.projector_out_dim = projector_out_dim
+
         # PCLR Supfinetune
         self.mode = mode
         self.eval_ways = eval_ways
@@ -160,6 +167,9 @@ class CLRGAT(pl.LightningModule):
                 self.gnn_loss = F.cross_entropy
         else:
             self.model = backbone
+
+        if self.use_projector:
+            self.projection_head = NNCLRProjectionHead(in_dim, projector_h_dim, projector_out_dim)
         # TODO: this way is better I think, to try again
         # if self.label_cleansing_opts["use"]:
         #     self.model.add_module("final_relu", nn.ReLU())
@@ -170,6 +180,8 @@ class CLRGAT(pl.LightningModule):
         loss_cnn = 0.
         z_orig, z = self.mpnn_forward(torch.cat([x_support, x_query]),
                                       torch.cat([y_support, y_query], 1).squeeze())
+        if self.use_projector:
+            z = self.projection_head(z)
         if self.mpnn_opts["loss_cnn"]:
             loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways,
                                                        temperature=self.mpnn_temperature)
@@ -344,7 +356,7 @@ class CLRGAT(pl.LightningModule):
         elif self.mpnn_opts["adapt"] == "instance":
             # TODO: change instance to include both x_a_i and x_b_i
             combined = torch.cat([x_a_i, x_b_i])
-            _, combined = self.mpnn_forward(combined)
+            combined = self.forward(combined)
             z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
         elif self.mpnn_opts["adapt"] == "ot":
             transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
@@ -417,12 +429,12 @@ class CLRGAT(pl.LightningModule):
                     y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
                 if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot"]:
-                    _, output = self.mpnn_forward(z_batch, y_batch)
+                    output = self.forward(z_batch)
                 # TODO: implement instance level feature sharing by introducing the entire query set in forward pass
                 elif self.mpnn_opts["adapt"] == "instance":
                     # lets use the entire query set?
                     combined = torch.cat([z_batch, x_b_i])
-                    _, combined = self.mpnn_forward(combined)
+                    combined = self.forward(combined)
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
                 else:
                     output = self.model.backbone(z_batch).flatten(1)
@@ -458,10 +470,10 @@ class CLRGAT(pl.LightningModule):
         # cannot do proto adapt here
         elif self.mpnn_opts["adapt"] == "instance":
             combined = torch.cat([x_a_i, x_b_i])
-            _, combined = self.mpnn_forward(combined)
+            combined = self.forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
         else:
-            _, output = self.mpnn_forward(x_b_i)
+            output = self.forward(x_b_i)
         scores = classifier(output)
 
         loss = F.cross_entropy(scores, y_query, reduction='mean')
@@ -492,7 +504,7 @@ class CLRGAT(pl.LightningModule):
             z = self.backbone(x)
             z = einops.rearrange(z, "b c h w -> 1 b (c h w)")
         else:
-            _, z = self.mpnn_forward(x)
+            z = self.forward(x)
             z = einops.rearrange(z, "b e -> 1 b e")
         z_support = z[:, :self.eval_ways * shots]
         z_query = z[:, self.eval_ways * shots:]

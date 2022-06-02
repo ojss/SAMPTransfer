@@ -1,17 +1,6 @@
 seed_everything: 72
-#slurm:
-#  nodes: 1
-#  mem_gb: 20
-#  timeout: 15
-#  # TODO: add new keys to other files
-#  partition: general
-#  constraint: ""
-#  comment: ""
-#  slurm_additional_parameters:
-#    qos: medium
-#    gres: gpu:a40:1
-#    signal: SIGUSR1@90
 model:
+  dataset: ${data.dataset}
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
@@ -20,6 +9,9 @@ model:
   sup_finetune: prototune # [prototune, std_proto, proto_maml]
   ft_freeze_backbone: False
   prototune_use_augs: False
+  use_projector: True
+  projector_h_dim: 6400
+  projector_out_dim: 1600
   sup_finetune_epochs: 15 # 15 for prototune
   eta_min: 5e-5
   lr: 0.0001563663718906821

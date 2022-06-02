@@ -1,6 +1,7 @@
 seed_everything: 72
 model:
   gnn_type: latentgnn
+  dataset: ${data.dataset}
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
