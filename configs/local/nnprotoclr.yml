@@ -1,6 +1,7 @@
 seed_everything: 72
 model:
-  gnn_type: latentgnn
+  arch: conv4
+  conv_4_out_planes: 64
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
@@ -22,7 +23,7 @@ model:
   n_query: ${data.n_query}
   queue_size: 4096
   mpnn_loss_fn: ce
-  mpnn_dev: cpu
+  mpnn_dev: cuda
   mpnn_opts:
     _use: False
     loss_cnn: False
@@ -58,17 +59,8 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.ConvNet
-    init_args:
-      opt:
-        in_planes: 3
-        out_planes: 64
-        num_stages: 4
-        average_end: False
 trainer:
-  gpus: 0
-  #  gradient_clip_val: 0.5
+  gpus: -1
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 1500
@@ -81,15 +73,9 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"
-        monitor: "val_accuracy"
+        monitor: "train_accuracy_epoch"
         save_top_k: 10
         every_n_epochs: 1
-        mode: "max"
-
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        patience: 200
-        monitor: "val_accuracy"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
@@ -97,10 +83,10 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  datapath: ../data/
-#  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-#  full_size_path: /home/ojass/projects/data/processed_images/
-  full_size_path: ../data/processed_images
+#  datapath: ../data/
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  full_size_path: /home/ojass/projects/data/processed_images/
+#  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
   batch_size: 64

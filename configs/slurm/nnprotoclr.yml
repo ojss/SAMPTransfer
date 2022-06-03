@@ -1,6 +1,7 @@
 seed_everything: 72
 model:
-  gnn_type: latentgnn
+  arch: conv4
+  conv_4_out_planes: 64
   dataset: ${data.dataset}
   optim: adam
   lr_sch: step
@@ -59,21 +60,12 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.ConvNet
-    init_args:
-      opt:
-        in_planes: 3
-        out_planes: 64
-        num_stages: 4
-        average_end: False
 trainer:
   gpus: -1
-
   num_sanity_val_steps: 1
   fast_dev_run: 0
-  max_epochs: 1500
-  limit_train_batches: 100
+  max_epochs: 1000
+  limit_train_batches: 300
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
@@ -90,16 +82,10 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"
-        monitor: "val_accuracy"
+        monitor: "train_accuracy_epoch"
         save_top_k: 2
         save_last: True
         every_n_epochs: 1
-        mode: "max"
-
-    - class_path: pytorch_lightning.callbacks.EarlyStopping
-      init_args:
-        patience: 200
-        monitor: "val_accuracy"
         mode: "max"
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
