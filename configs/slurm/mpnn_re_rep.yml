@@ -1,11 +1,14 @@
 seed_everything: 72
 model:
+  arch: conv4
+  conv_4_out_planes: 64
+  avg_end: False
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: ${model.lr}
-  sup_finetune: prototune # [prototune, std_proto, proto_maml]
+  sup_finetune: std_proto # [prototune, std_proto, proto_maml]
   ft_freeze_backbone: True
   prototune_use_augs: False
   sup_finetune_epochs: 15 # 15 for prototune
@@ -27,7 +30,7 @@ model:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: re_rep
+    adapt: ot
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -58,13 +61,6 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.CNN_4Layer
-    init_args:
-      global_pooling: False
-      in_channels: 3
-      final_maxpool: True
-      ada_maxpool: False
 trainer:
   gpus: -1
   num_sanity_val_steps: 2

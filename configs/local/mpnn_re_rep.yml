@@ -1,11 +1,14 @@
 seed_everything: 72
 model:
+  arch: conv4
+  conv_4_out_planes: 64
+  avg_end: False
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
-  sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
+  sup_finetune: std_proto # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821
@@ -20,12 +23,12 @@ model:
   alpha1: 0.5
   alpha2: 0.5
   mpnn_loss_fn: ce
-  mpnn_dev: cpu
+  mpnn_dev: cuda
   mpnn_opts:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: instance
+    adapt: ot
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -56,15 +59,8 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.CNN_4Layer
-    init_args:
-      global_pooling: False
-      in_channels: 3
-      final_maxpool: True
-      ada_maxpool: False
 trainer:
-  gpus: 0
+  gpus: -1
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
@@ -93,10 +89,10 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  datapath: ../data/
-  #  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  #  full_size_path: /home/ojass/projects/data/processed_images/
-  full_size_path: ../data/processed_images
+#  datapath: ../data/
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  full_size_path: /home/ojass/projects/data/processed_images/
+#  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
   batch_size: 64

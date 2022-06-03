@@ -2,7 +2,7 @@ __all__ = ['CLRGATREP']
 
 import copy
 import uuid
-from typing import Optional, Iterable, Union, Tuple
+from typing import Optional, Iterable, Union, Tuple, List
 
 import einops
 import kornia as K
@@ -12,6 +12,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from deepspeed.ops.adam import FusedAdam
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
@@ -22,15 +23,12 @@ from tqdm.auto import tqdm
 
 from clr_gat import GNN
 from dataloaders import UnlabelledDataModule
+from feature_extractors.feature_extractor import create_model
 from proto_utils import (get_prototypes,
                          prototypical_loss, euclidean_distance)
-from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
 
-
-#############################
-# TODO: Implement feature representation
 
 class CLRGATREP(pl.LightningModule):
     def __init__(self,
@@ -39,12 +37,14 @@ class CLRGATREP(pl.LightningModule):
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 feature_extractor: nn.Module,
+                 arch: str,
+                 conv_4_out_planes: Optional[Union[List, int]],
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  mpnn_dev: str,
                  pretrain_re_rep: bool,
                  img_orig_size: Iterable,
+                 avg_end: bool = False,
                  optim: str = 'adam',
                  dataset='omniglot',
                  weight_decay=0.01,
@@ -67,7 +67,13 @@ class CLRGATREP(pl.LightningModule):
                  re_rep_temp: float = 0.07):
         super().__init__()
         self.save_hyperparameters()
-        backbone = feature_extractor
+        self.out_planes = conv_4_out_planes
+        if arch == "conv4":
+            backbone = create_model(
+                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=avg_end))
+        elif arch in torchvision.models.__dict__.keys():
+            net = torchvision.models.__dict__[arch](pretrained=False)
+            backbone = nn.Sequential(*list(net.children())[:-1])
 
         self.dataset = dataset
         self.batch_size = batch_size
@@ -296,8 +302,7 @@ class CLRGATREP(pl.LightningModule):
         batch_size = n_way
         support_size = n_way * n_support
 
-        y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(
-            self.device)  # (25,)
+        y_a_i = Variable(torch.from_numpy(np.repeat(range(n_way), n_support))).to(self.device)  # (25,)
         y_b_i = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
         x_b_i = x_query_var
@@ -308,12 +313,6 @@ class CLRGATREP(pl.LightningModule):
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
             z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
-        elif self.mpnn_opts["adapt"] == "ot":
-            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
-                                                     stopping_criterion=1e-4, device=self.device)
-            z_a_i = self.forward(x_a_i)
-            z_query = self.forward(x_b_i)
-            z_a_i, _ = transportation_module(z_a_i, z_query)
         elif self.mpnn_opts["adapt"] == "re_rep":
             combined = torch.cat([x_a_i, x_b_i])
             _, z = self.mpnn_forward(combined)
@@ -364,8 +363,7 @@ class CLRGATREP(pl.LightningModule):
                     delta_opt.zero_grad()
 
                 #####################################
-                selected_id = torch.from_numpy(
-                    rand_id[j: min(j + batch_size, support_size)]).to(device)
+                selected_id = torch.from_numpy(rand_id[j: min(j + batch_size, support_size)]).to(device)
 
                 z_batch = x_a_i[selected_id]
                 y_batch = y_a_i[selected_id]
@@ -380,7 +378,6 @@ class CLRGATREP(pl.LightningModule):
                     _, combined = self.mpnn_forward(combined)
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
                 elif self.mpnn_opts["adapt"] == "re_rep":
-                    # TODO: a projector may help here?
                     combined = torch.cat([z_batch, x_b_i])
                     _, combined = self.mpnn_forward(combined)
                     output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2, self.re_rep_temp)
