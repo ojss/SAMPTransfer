@@ -10,6 +10,7 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
+from optimal_transport.sot import SOT
 from proto_utils import get_prototypes, prototypical_loss
 
 
@@ -56,6 +57,11 @@ def std_proto_form(self, batch, batch_idx):
     if not self.mpnn_opts["_use"]:
         z = self.model.backbone(x)
         z = einops.rearrange(z, "b c h w -> b (c h w)")
+    elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "ot":
+        sot = SOT(distance_metric=self.distance)
+        z = self.forward(x)
+        z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, self.re_rep_temp))
+        z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support)
     elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "re_rep":
         _, z = self.mpnn_forward(x)
         z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, self.re_rep_temp))
