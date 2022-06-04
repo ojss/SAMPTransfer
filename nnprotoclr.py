@@ -4,7 +4,6 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple, List
 
-import einops
 import kornia as K
 import numpy as np
 import pl_bolts.optimizers
@@ -14,22 +13,72 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from deepspeed.ops.adam import FusedAdam
+from lightly.data import LightlyDataset, SimCLRCollateFunction
 from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
 from pytorch_metric_learning import losses
 from torch.autograd import Variable
+from torch.utils.data import ConcatDataset, DataLoader
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 from clr_gat import GNN
-from dataloaders import UnlabelledDataModule
+from dataloaders import get_episode_loader
 from feature_extractors.feature_extractor import create_model
 from misc.dino_utils import get_rank
 from proto_utils import get_prototypes, prototypical_loss
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
+
+
+class NNProtoCLRDataModule(pl.LightningDataModule):
+    def __init__(self, dataset: str, data_path: str, fsl_data_path: str, bsize: int, num_workers: int, input_size: int,
+                 eval_ways: int, eval_shots: int, eval_query_shots: int):
+        super(NNProtoCLRDataModule, self).__init__()
+        self.data_path = data_path
+        self.num_classes = 80
+        self.name = dataset
+
+        self.bsize = bsize
+        self.num_workers = num_workers
+        self.input_size = input_size
+
+        self.fsl_data_path = fsl_data_path
+        self.eval_ways = eval_ways
+        self.eval_shots = eval_shots
+        self.eval_query_shots = eval_query_shots
+
+    def train_dataloader(self):
+        train_ds = torchvision.datasets.ImageFolder(self.data_path + "/train")
+        val_ds = torchvision.datasets.ImageFolder(self.data_path + "/val")
+        trainval_ds = ConcatDataset([train_ds, val_ds])
+        dataset = LightlyDataset.from_torch_dataset(trainval_ds)
+        collate_fn = SimCLRCollateFunction(input_size=self.input_size)
+        dataloader = DataLoader(dataset, batch_size=self.bsize, collate_fn=collate_fn, shuffle=True, drop_last=True,
+                                num_workers=self.num_workers
+                                )
+        return dataloader
+
+    def val_dataloader(self):
+        return get_episode_loader(self.name, self.fsl_data_path,
+                                  ways=self.eval_ways,
+                                  shots=self.eval_shots,
+                                  test_shots=self.eval_query_shots,
+                                  batch_size=1,
+                                  split='val',
+                                  shuffle=False)
+
+    def test_dataloader(self):
+        return get_episode_loader(self.name, self.fsl_data_path,
+                                  ways=self.eval_ways,
+                                  shots=self.eval_shots,
+                                  test_shots=self.eval_query_shots,
+                                  batch_size=1,
+                                  split='test',
+                                  num_workers=4,
+                                  shuffle=False)
 
 
 class NNProtoCLR(pl.LightningModule):
@@ -57,6 +106,7 @@ class NNProtoCLR(pl.LightningModule):
                  weight_decay=0.01,
                  lr=1e-3,
                  lr_sch='cos',
+                 classifier_lr: float = 1e-3,
                  warmup_epochs=10,
                  warmup_start_lr=1e-3,
                  eta_min=1e-5,
@@ -142,6 +192,10 @@ class NNProtoCLR(pl.LightningModule):
             self.prediction_head = NNCLRPredictionHead(projection_out_dim, pred_h_dim, projection_out_dim)
         else:
             self.prediction_head = nn.Identity()
+
+        # TODO: add online classifier later for training acc
+        self.classifier = nn.Linear(in_features=emb_dim, out_features=80)
+        self.classifier_lr = classifier_lr
 
         # queue
         self.register_buffer("queue", torch.randn(self.queue_size, projection_out_dim))
@@ -324,54 +378,25 @@ class NNProtoCLR(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        data = batch['origs']
-        views = batch['views']
-        supp_true_labels = batch['labels'][:, 0]
-        data = data.unsqueeze(0)
-        # e.g. 50 images, 2 support, 2 query, miniImageNet: torch.Size([1, 50, 4, 3, 84, 84])
-        batch_size = data.size(0)
-        ways = data.size(1)
-
-        # Divide into support and query shots
-        # x_support = data[:, :, :self.n_support]
-        # e.g. [1,50*n_support,*(3,84,84)]
-        x_support = data.reshape((batch_size, ways * self.n_support, *data.shape[-3:])).squeeze(0)
-        x_query = views.reshape((ways * self.n_query, *views.shape[-3:]))
-        # x_query = data[:, :, self.n_support:].squeeze(0)
-        # e.g. [1,50*n_query,*(3,84,84)]
-        # x_query = x_query.reshape(
-        #     (batch_size, ways * self.n_query, *x_query.shape[-3:]))
-
-        # Create dummy query labels
-        y_query = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
-        y_query = y_query.repeat(batch_size, 1, self.n_query)
-        y_query = y_query.view(batch_size, -1).to(self.device)
-
-        y_support = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
-        y_support = y_support.repeat(batch_size, 1, self.n_support)
-        y_support = y_support.view(batch_size, -1).to(self.device)
-        z_orig, z, p = self.forward(torch.cat([x_support, x_query]))
-        z1, z2 = z.split([ways * self.n_support, ways * self.n_query])
+        (x1, x2), targets, _ = batch
+        _o1, z1, p1 = self.forward(x1)
+        _o2, z2, p2 = self.forward(x2)
         z1 = F.normalize(z1, dim=-1)
         z2 = F.normalize(z2, dim=-1)
 
         idx1, nn1 = self.find_nn(z1)
-        # self.calculate_protoclr_loss(z, y_support, y_query, ways)
-        targets = supp_true_labels[: ways * self.n_support]
-        nn1 - F.normalize(nn1, dim=-1)
+        _, nn2 = self.find_nn(z2)
 
-        z = torch.cat([z1, z2])
-        y = torch.cat([y_support, y_query], dim=-1)
-        logits = nn1 @ z.T
-        logits = einops.rearrange(logits, "s q -> 1 s q")
-        loss = F.cross_entropy(logits, y)  # TODO: can be replaced with NTXent?
-        _, predictions = torch.max(logits, dim=1)
-        acc = accuracy(predictions, y)
+        loss = (
+                self.nnclr_loss_func(nn1, p2, temperature=self.temperature) / 2
+                + self.nnclr_loss_func(nn2, p1, temperature=self.temperature) / 2
+        )
+
         b = targets.size(0)
         nn_acc = (targets == self.queue_y[idx1]).sum() / b
 
         self.dequeue_and_enqueue(z1, targets)
-        self.log_dict(dict(train_loss=loss.item(), train_accuracy=acc, train_nn_acc=nn_acc),
+        self.log_dict(dict(train_loss=loss.item(), train_nn_acc=nn_acc),
                       on_epoch=True,
                       on_step=True,
                       prog_bar=True)
@@ -582,7 +607,7 @@ class NNProtoCLR(pl.LightningModule):
 def cli_main():
     UUID = uuid.uuid4()
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
-    cli = LightningCLI(NNProtoCLR, UnlabelledDataModule, run=False,
+    cli = LightningCLI(NNProtoCLR, NNProtoCLRDataModule, run=False,
                        save_config_overwrite=True,
                        parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model, cli.datamodule)
@@ -592,7 +617,7 @@ def cli_main():
 def slurm_main(conf_path, UUID):
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     print(conf_path)
-    cli = LightningCLI(NNProtoCLR, UnlabelledDataModule, run=False,
+    cli = LightningCLI(NNProtoCLR, NNProtoCLRDataModule, run=False,
                        save_config_overwrite=True,
                        save_config_filename=str(UUID),
                        parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})

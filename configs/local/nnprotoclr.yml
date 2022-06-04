@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: conv4
+  arch: resnet18
   conv_4_out_planes: 64
   optim: adam
   lr_sch: step
@@ -17,10 +17,10 @@ model:
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
-  img_orig_size: ${data.img_size_orig}
-  batch_size: ${data.batch_size}
-  n_support: ${data.n_support}
-  n_query: ${data.n_query}
+  img_orig_size: [ 84, 84 ]
+  batch_size: ${data.bsize}
+  n_support: 1
+  n_query: 3
   queue_size: 4096
   mpnn_loss_fn: ce
   mpnn_dev: cuda
@@ -84,14 +84,12 @@ trainer:
 data:
   dataset: "miniimagenet"
 #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
+  fsl_data_path: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  data_path: /home/ojass/projects/data/processed_images/
 #  full_size_path: ../data/processed_images
-  n_support: 1
-  n_query: 3
-  batch_size: 64
+  input_size: 224
+  bsize: 64
+  eval_shots: 5
+  eval_ways: 5
+  eval_query_shots: 15
   num_workers: 0
-  tfm_method: vicreg
-  img_size_orig: [ 84, 84 ]
-  img_size_crop: [ 84, 84 ]
-  no_aug_support: True
