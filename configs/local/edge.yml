@@ -1,14 +1,17 @@
 seed_everything: 72
 model:
-  gnn_type: latentgnn
+  arch: scl_convnet4
+  out_planes: 64
+  scl: True
+  att_feat_dim: 80
+  gnn_type: gat
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
-  sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
+  sup_finetune: prototune # [prototune, std_proto, label_cleansing, sinkhorn]
   sup_finetune_epochs: 15
-#  finetune_use_projector: None
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -18,6 +21,29 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  use_projector: False
+  projector_h_dim: 6400
+  projector_out_dim: 1600
+  label_cleansing_opts:
+    use: False
+    n_test_runs: 1000
+    n_ways: 5
+    n_shots: 5
+    n_queries: 15
+    unbalanced: False
+    reduce: null # ['isomap', 'itsa', 'mds', 'lle', 'se', 'pca', 'none']
+    inference_semi: transductive # ['transductive', 'inductive', 'inductive_sk']
+    d: 5
+    alpha: 0.8
+    K: 20 # neighbours used for manifold creation
+    T: 3 # power to raise probs matrix before sinkhorn algorithm
+    lr: 0.00001 # learning rate of fine-tuning
+    denoising_iterations: 1000
+    beta_pt: 0.5 # power transform power
+    best_samples: 3 # number of best samples per class chosen for pseudolabels
+    semi_inference_method: transductive # ['transductive', 'inductive']
+    sinkhorn_iter: 1
+    use_pt: True # [True, False]
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
@@ -33,7 +59,7 @@ model:
       set_negative: "hard"
     gnn_params:
       pretrained_path: "no"
-      red: 0
+      red: 1
       cat: 0
       every: 0
       gnn:
@@ -55,14 +81,7 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.ConvNet
-    init_args:
-      opt:
-        in_planes: 3
-        out_planes: 64
-        num_stages: 4
-        average_end: False
+  feature_extractor: null
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5
@@ -100,7 +119,7 @@ data:
   #  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
-  batch_size: 64
+  batch_size: 8
   num_workers: 0
   tfm_method: vicreg
   img_size_orig: [ 84, 84 ]

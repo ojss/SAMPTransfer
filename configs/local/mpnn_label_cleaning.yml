@@ -1,5 +1,9 @@
 seed_everything: 72
 model:
+  arch: scl_conv4
+  out_planes: 64
+  scl: True
+  att_feat_dim: 64
   gnn_type: gat
   optim: adam
   lr_sch: step
@@ -17,8 +21,11 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  use_projector: False
+  projector_h_dim: 6400
+  projector_out_dim: 1600
   label_cleansing_opts:
-    use: True
+    use: False
     n_test_runs: 1000
     n_ways: 5
     n_shots: 5
@@ -38,7 +45,7 @@ model:
     sinkhorn_iter: 1
     use_pt: True # [True, False]
   mpnn_loss_fn: ce
-  mpnn_dev: cpu
+  mpnn_dev: cuda
   mpnn_opts:
     _use: True
     loss_cnn: True
@@ -74,16 +81,9 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.ConvNet
-    init_args:
-      opt:
-        in_planes: 3
-        out_planes: 64
-        num_stages: 4
-        average_end: False
+  feature_extractor: null
 trainer:
-  gpus: 0
+  gpus: -1
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
@@ -113,13 +113,13 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  datapath: ../data/
-#  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-#  full_size_path: /home/ojass/projects/data/processed_images/
-  full_size_path: ../data/processed_images
+#  datapath: ../data/
+  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  full_size_path: /home/ojass/projects/data/processed_images/
+#  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
-  batch_size: 64
+  batch_size: 16
   num_workers: 0
   tfm_method: vicreg
   img_size_orig: [ 84, 84 ]

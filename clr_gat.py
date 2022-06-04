@@ -2,6 +2,7 @@ __all__ = ['CLRGAT', 'GNN']
 
 import copy
 import uuid
+from types import SimpleNamespace
 from typing import Optional, Iterable, Union, Tuple
 
 import einops
@@ -12,6 +13,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from deepspeed.ops.adam import FusedAdam
 from lightly.models.modules import NNCLRProjectionHead
 from omegaconf import OmegaConf
@@ -21,28 +23,36 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
+from SCL.losses import ContrastiveLoss
+from SCL.models.attention import AttentionSimilarity
+from SCL.models.contrast import ContrastResNet
 from dataloaders import UnlabelledDataModule
+from feature_extractors.feature_extractor import create_model
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from graph.latentgnn import LatentGNNV1
 from proto_utils import (get_prototypes,
                          prototypical_loss)
+from utils.label_cleansing import label_finetuning
 from utils.optimal_transport import OptimalTransport
+from utils.rerepresentation import re_represent
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
-from utils.label_cleansing import label_finetuning
-from utils.rerepresentation import re_represent
 
+
+######################
+# TODO: make sure only one z is returned for the models' forward in the finetuning method
 
 class GNN(nn.Module):
     def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat",
-                 final_relu: bool = False):
+                 final_relu: bool = False, scl: bool = False):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
         self.mpnn_opts = mpnn_opts
         self.gnn_type = gnn_type
+        self.scl = scl
         mpnn_dev = mpnn_dev
         if gnn_type == "gat_v2":
             self.gnn = GAT(in_channels=emb_dim, hidden_channels=emb_dim // 4, out_channels=emb_dim,
@@ -62,14 +72,24 @@ class GNN(nn.Module):
         else:
             self.relu_final = nn.Identity()
 
+    def scl_forward(self, x):
+        _, spatial_f, global_f, avg_pool_feat = self.backbone(x)
+        # todo: check if GNN out on avg_pool_feat vs projector out is better
+        edge_attr, edge_index, gnn_out = self.graph_generator.get_graph(avg_pool_feat)
+        _, (gnn_out,) = self.gnn(gnn_out, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        return spatial_f, global_f, avg_pool_feat, gnn_out
+
     def forward(self, x):
+        if self.scl:
+            return self.scl_forward(x)
         if "gat" in self.gnn_type:
-            z = self.backbone(x).flatten(1)
+            z = self.backbone(x)
             z_cnn = z.clone()
+            z = z.flatten(1)
             edge_attr, edge_index, z = self.graph_generator.get_graph(z)
         else:
             z = self.backbone(x)
-            z_cnn = z.clone().flatten(1)
+            z_cnn = z.clone()
         if self.gnn_type == "gat_v2":
             z = self.gnn(z, edge_index.t().contiguous())
         elif self.gnn_type == "gat":
@@ -83,12 +103,13 @@ class GNN(nn.Module):
 
 class CLRGAT(pl.LightningModule):
     def __init__(self,
+                 arch: str,
+                 out_planes: Union[Iterable, int],
                  n_support,
                  n_query,
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 feature_extractor: nn.Module,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  mpnn_dev: str,
@@ -97,6 +118,8 @@ class CLRGAT(pl.LightningModule):
                  use_projector: bool,
                  projector_h_dim: int,
                  projector_out_dim: int,
+                 scl: bool = False,
+                 att_feat_dim: int = 80,
                  gnn_type: str = "gat",
                  optim: str = 'adam',
                  dataset='omniglot',
@@ -115,16 +138,45 @@ class CLRGAT(pl.LightningModule):
                  sup_finetune_epochs=15,
                  finetune_use_projector: Optional[int] = None,
                  ft_freeze_backbone=True,
-                 finetune_batch_norm=False):
+                 finetune_batch_norm=False,
+                 feature_extractor: Optional[nn.Module] = None):
         super().__init__()
         self.save_hyperparameters()
-        backbone = feature_extractor
 
         self.dataset = dataset
         self.batch_size = batch_size
         self.n_support = n_support
         self.n_query = n_query
         self.distance = distance
+        self.scl = scl
+        self.out_planes = out_planes
+
+        if feature_extractor is not None:
+            backbone = feature_extractor
+        elif arch == "conv4":
+            backbone = create_model(dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=True))
+        elif "scl" in arch and self.scl:
+            model_name = arch.replace("scl_", "")
+            in_dim = hidden_size = 64
+            if model_name == "resnet12":
+                in_dim = hidden_size = 640
+            # TODO: careful about the feat_dim here. its for the projector
+            tmp = {"model": model_name, "dataset": "miniImageNet", "feat_dim": 80, "global_cont_loss": True,
+                   "spatial_cont_loss": True}
+            opt = SimpleNamespace(**tmp)
+            backbone = ContrastResNet(opt, 0)
+            self.spatial_attention = AttentionSimilarity(hidden_size=hidden_size, inner_size=att_feat_dim,
+                                                         aggregation="mean")
+            self.scl_criterion = ContrastiveLoss(temperature=10)
+            # todo: the below works, but needs a projector layer at the end - make sure to add it
+            # backbone = create_model(dict(in_planes=3, out_planes=self.out_planes,
+            #                              use_pool=[True, True, True, False],
+            #                              num_stages=4, average_end=True))
+        elif arch in torchvision.models.__dict__.keys():
+            net = torchvision.models.__dict__[arch](pretrained=False)
+            backbone = nn.Sequential(*list(net.children())[:-1])
+        if not self.scl:
+            _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
 
         self.weight_decay = weight_decay
         self.optim = optim
@@ -155,12 +207,11 @@ class CLRGAT(pl.LightningModule):
         self.label_cleansing_opts = label_cleansing_opts
 
         self.mpnn_opts = mpnn_opts
-        _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
 
         self.dim = in_dim
         if mpnn_opts["_use"]:
             self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type,
-                             final_relu=self.label_cleansing_opts["use"])
+                             final_relu=self.label_cleansing_opts["use"], scl=self.scl)
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
@@ -176,23 +227,6 @@ class CLRGAT(pl.LightningModule):
         #     self.model.add_module("final_relu", nn.ReLU())
 
         self.automatic_optimization = True
-
-    def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
-        loss_cnn = 0.
-        z_orig, z = self.mpnn_forward(torch.cat([x_support, x_query]),
-                                      torch.cat([y_support, y_query], 1).squeeze())
-        if self.use_projector:
-            z = self.projection_head(z)
-        if self.mpnn_opts["loss_cnn"]:
-            loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways,
-                                                       temperature=self.mpnn_temperature)
-            loss_cnn *= self.mpnn_opts["scaling_ce"]
-            self.log("loss_cnn", loss_cnn.item())
-        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
-                                                 ways, loss_fn=self.gnn_loss,
-                                                 temperature=self.mpnn_temperature)
-        loss = loss + loss_cnn
-        return loss, acc, z
 
     def configure_optimizers(self):
         # TODO: make this bit configurable
@@ -230,6 +264,10 @@ class CLRGAT(pl.LightningModule):
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
+    def scl_mpnn_forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        spatial_f, global_f, avg_pool_feat, gnn_out = self.model(x)
+        return spatial_f, global_f, avg_pool_feat, gnn_out
+
     def mpnn_forward(self, x, y=None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -243,10 +281,57 @@ class CLRGAT(pl.LightningModule):
 
     def forward(self, x):
         if self.mpnn_opts["_use"]:
-            _, z = self.model(x)
+            if self.scl:
+                _, _, _, z = self.model(x)
+            else:
+                _, z = self.model(x)
         else:
             z = self.model(x).flatten(1)
         return z
+
+    def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
+        losses = []
+        z_orig, z = self.mpnn_forward(torch.cat([x_support, x_query]),
+                                      torch.cat([y_support, y_query], 1).squeeze())
+        if self.use_projector:
+            z = self.projection_head(z)
+        if self.mpnn_opts["loss_cnn"]:
+            loss, _ = self.calculate_protoclr_loss(z_orig.flatten(1), y_support, y_query, ways,
+                                                   temperature=self.mpnn_temperature)
+            loss *= self.mpnn_opts["scaling_ce"]
+            losses.append(loss)
+            self.log("loss_cnn", loss.item())
+
+        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
+                                                 ways, loss_fn=self.gnn_loss,
+                                                 temperature=self.mpnn_temperature)
+        losses.append(loss)
+        loss = sum(losses)
+        return loss, acc, z
+
+    def scl_forward_pass(self, x_support, x_query, y_support, y_query, ways):
+        losses = []
+        spatial_f, global_f, avg_pool_feat, gnn_out = self.scl_mpnn_forward(torch.cat([x_support, x_query]))
+        # todo: see if this needs a projector head here in conjunction with ConvBlock impl
+        if self.mpnn_opts["loss_cnn"]:
+            loss, _ = self.calculate_protoclr_loss(global_f, y_support, y_query, ways,
+                                                   temperature=self.mpnn_temperature)
+            loss *= self.mpnn_opts["scaling_ce"]
+            losses.append(loss)
+            self.log("loss_cnn", loss.item())
+        if self.scl:
+            y = torch.cat([y_support, y_query], dim=-1)
+            y = einops.rearrange(y, "1 l -> l")
+            loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)  # todo: remove y if needed
+            losses.append(loss)
+            self.log("loss_spatial", loss.item())
+
+        loss, acc = self.calculate_protoclr_loss(gnn_out, y_support, y_query,
+                                                 ways, loss_fn=self.gnn_loss,
+                                                 temperature=self.mpnn_temperature)
+        losses.append(loss)
+        loss = sum(losses)
+        return loss, acc, gnn_out
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
@@ -303,8 +388,10 @@ class CLRGAT(pl.LightningModule):
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
-
-        loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
+        if self.scl:
+            loss, acc, z = self.scl_forward_pass(x_support, x_query, y_support, y_query, ways)
+        else:
+            loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
         self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
 
         return {"loss": loss, "accuracy": acc,
@@ -355,7 +442,6 @@ class CLRGAT(pl.LightningModule):
             proto = z_proto
             z_a_i = z_support
         elif self.mpnn_opts["adapt"] == "instance":
-            # TODO: change instance to include both x_a_i and x_b_i
             combined = torch.cat([x_a_i, x_b_i])
             combined = self.forward(combined)
             z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
@@ -532,7 +618,28 @@ class CLRGAT(pl.LightningModule):
                                       distance=self.distance)
         return loss, acc
 
-    # TODO: check if validation is to be done with teacher or student
+    @torch.enable_grad()
+    def lab_cleaning(self, batch, batch_idx):
+        x_support = batch['train'][0][0]  # only take data & only first batch
+        x_support = x_support.to(self.device)
+        x_support_var = Variable(x_support)
+        x_query = batch['test'][0][0]  # only take data & only first batch
+        x_query = x_query.to(self.device)
+        x_query_var = Variable(x_query)
+        n_support = x_support.shape[0] // self.eval_ways
+        n_query = x_query.shape[0] // self.eval_ways
+
+        batch_size = self.eval_ways
+        support_size = self.eval_ways * n_support
+        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
+        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
+        z = self.forward(torch.cat([x_support_var, x_query_var]))
+        support_features, query_features = re_represent(z, support_size, .5, .5, .07)
+        # support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
+        self.label_cleansing_opts["n_ways"] = self.eval_ways
+        y_query, y_query_pred = label_finetuning(self.label_cleansing_opts, support_features, y_supp, y_query,
+                                                 query_features)
+        return y_query, y_query_pred
 
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
@@ -565,29 +672,6 @@ class CLRGAT(pl.LightningModule):
                                               inner_lr=self.sup_finetune_lr)
         self.load_state_dict(original_encoder_state)
         return loss, acc
-
-    @torch.enable_grad()
-    def lab_cleaning(self, batch, batch_idx):
-        x_support = batch['train'][0][0]  # only take data & only first batch
-        x_support = x_support.to(self.device)
-        x_support_var = Variable(x_support)
-        x_query = batch['test'][0][0]  # only take data & only first batch
-        x_query = x_query.to(self.device)
-        x_query_var = Variable(x_query)
-        n_support = x_support.shape[0] // self.eval_ways
-        n_query = x_query.shape[0] // self.eval_ways
-
-        batch_size = self.eval_ways
-        support_size = self.eval_ways * n_support
-        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
-        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
-        z = self.forward(torch.cat([x_support_var, x_query_var]))
-        support_features, query_features = re_represent(z, support_size, .5, .5, .07)
-        # support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
-        self.label_cleansing_opts["n_ways"] = self.eval_ways
-        y_query, y_query_pred = label_finetuning(self.label_cleansing_opts, support_features, y_supp, y_query,
-                                                 query_features)
-        return y_query, y_query_pred
 
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)

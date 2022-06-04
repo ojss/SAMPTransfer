@@ -59,6 +59,14 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
+  feature_extractor:
+    class_path: feature_extractors.feature_extractor.ConvNet
+    init_args:
+      opt:
+        in_planes: 3
+        out_planes: 64
+        num_stages: 4
+        average_end: False
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5

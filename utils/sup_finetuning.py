@@ -246,3 +246,77 @@ def proto_maml(self, batch, batch_idx):
     acc = accuracy(predictions, y_query)
 
     return loss, acc
+
+
+class BaselineFinetune(nn.Module):
+    """
+    training the classifier for a single testing run
+    """
+
+    def __init__(self, n_ways=5, n_shots=5, n_aug_support_samples=5, n_queries=15, feat_dim=640):
+        super(BaselineFinetune, self).__init__()
+        self.n_way = n_ways
+        self.n_support = n_aug_support_samples
+        self.n_query = n_queries
+        self.feat_dim = feat_dim
+        self.alpha = 0.05 if self.n_way == 1 else 0.01
+        self.lr = 0.5 if self.n_way == 1 else 1.0
+
+    def forward(self, z_support, y_support, z_query, spatial=False, weight_inprint=False):
+        torch.manual_seed(0)
+        kernel_size = (z_support.size(2), z_support.size(3)) if spatial else None
+        y_support = y_support.view(-1)
+
+        if spatial:
+            assert z_support.dim() == 4
+            assert z_query.dim() == 4
+        else:
+            if z_support.dim() == 4:
+                z_support = z_support.view(z_support.size(0), z_support.size(1), -1).mean(-1)
+                z_query = z_query.view(z_query.size(0), z_query.size(1), -1).mean(-1)
+
+        z_support = F.normalize(z_support, dim=1, p=2)
+        z_query = F.normalize(z_query, dim=1, p=2)
+
+        if spatial:
+            linear_clf = nn.Sequential(nn.AdaptiveMaxPool2d(2),
+                                       nn.Conv2d(self.feat_dim, self.n_way, kernel_size=(2, 2), padding=0))
+        else:
+            linear_clf = nn.Linear(self.feat_dim, self.n_way)
+
+        linear_clf = linear_clf.cuda()
+
+        if weight_inprint:
+            if spatial:
+                z_support_pooled = nn.AdaptiveMaxPool2d(2)(z_support)
+                prototypes = [z_support_pooled[y_support == l].mean(0) for l in y_support.unique()]
+            else:
+                prototypes = [z_support[y_support == l].mean(0) for l in y_support.unique()]
+            prototypes = F.normalize(torch.stack(prototypes), dim=1, p=2)
+
+            if spatial:
+                linear_clf[1].weight.data.copy_(prototypes.data)
+            else:
+                linear_clf.weight.data.copy_(prototypes.data)
+
+        set_optimizer = torch.optim.LBFGS(linear_clf.parameters(), lr=self.lr)
+        loss_function = nn.CrossEntropyLoss().cuda()
+
+        def closure():
+            set_optimizer.zero_grad()
+            scores = linear_clf(z_support).squeeze()
+            loss = loss_function(scores, y_support)
+
+            l2_penalty = 0
+            for param in linear_clf.parameters():
+                l2_penalty = l2_penalty + 0.5 * (param ** 2).sum()
+            loss = loss + self.alpha * l2_penalty
+
+            loss.backward()
+
+            return loss
+
+        set_optimizer.step(closure)
+
+        scores = linear_clf(z_query).squeeze().softmax(1).detach().cpu().numpy()
+        return scores
