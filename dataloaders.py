@@ -452,6 +452,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                             test_shots=self.eval_query_shots,
                                             batch_size=1,
                                             split='val',
+                                            shuffle=False,
                                             **self.kwargs)
         return dataloader_val
 
