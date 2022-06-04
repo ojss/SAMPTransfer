@@ -1,18 +1,17 @@
 seed_everything: 72
 model:
-  dataset: ${data.dataset}
+  arch: scl_conv4
+  out_planes: 64
+  scl: True
+  att_feat_dim: 80
+  gnn_type: gat
   optim: adam
   lr_sch: step
   warmup_start_lr: 1e-3
   warmup_epochs: 250
-  sup_finetune_lr: ${model.lr}
-  sup_finetune: prototune # [prototune, std_proto, proto_maml]
-  ft_freeze_backbone: False
-  prototune_use_augs: False
-  use_projector: True
-  projector_h_dim: 6400
-  projector_out_dim: 1600
-  sup_finetune_epochs: 15 # 15 for prototune
+  sup_finetune_lr: 0.0001563663718906821
+  sup_finetune: prototune # [prototune, std_proto, label_cleansing, sinkhorn]
+  sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821
   lr_decay_step: 25000
@@ -22,6 +21,9 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
+  use_projector: False
+  projector_h_dim: 6400
+  projector_out_dim: 1600
   label_cleansing_opts:
     use: False
     n_test_runs: 1000
@@ -41,14 +43,14 @@ model:
     best_samples: 3 # number of best samples per class chosen for pseudolabels
     semi_inference_method: transductive # ['transductive', 'inductive']
     sinkhorn_iter: 1
-    use_pt: False # [True, False]
+    use_pt: True # [True, False]
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
     _use: True
     loss_cnn: True
     scaling_ce: 1
-    adapt: ot
+    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -61,7 +63,7 @@ model:
       cat: 0
       every: 0
       gnn:
-        num_layers: 1
+        num_layers: 1 # for gatv2
         aggregator: "add"
         num_heads: 2
         attention: "dot"
@@ -75,17 +77,11 @@ model:
         dropout_2: 0.1
         mult_attr: 0
       classifier:
-        neck: 1
+        neck: 0
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor:
-    class_path: feature_extractors.feature_extractor.CNN_4Layer
-    init_args:
-      global_pooling: False
-      in_channels: 3
-      final_maxpool: True
-      ada_maxpool: False
+  feature_extractor: null
 trainer:
   gpus: -1
   num_sanity_val_steps: 2
