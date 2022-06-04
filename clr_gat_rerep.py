@@ -39,6 +39,7 @@ class CLRGATREP(pl.LightningModule):
                  lr_decay_rate,
                  arch: str,
                  conv_4_out_planes: Optional[Union[List, int]],
+                 feature_extractor: nn.Module,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  mpnn_dev: str,
@@ -68,12 +69,15 @@ class CLRGATREP(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.out_planes = conv_4_out_planes
-        if arch == "conv4":
-            backbone = create_model(
-                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=avg_end))
-        elif arch in torchvision.models.__dict__.keys():
-            net = torchvision.models.__dict__[arch](pretrained=False)
-            backbone = nn.Sequential(*list(net.children())[:-1])
+        if feature_extractor is not None:
+            backbone = feature_extractor
+        else:
+            if arch == "conv4":
+                backbone = create_model(
+                    dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=avg_end))
+            elif arch in torchvision.models.__dict__.keys():
+                net = torchvision.models.__dict__[arch](pretrained=False)
+                backbone = nn.Sequential(*list(net.children())[:-1])
 
         self.dataset = dataset
         self.batch_size = batch_size
