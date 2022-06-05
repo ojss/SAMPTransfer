@@ -96,8 +96,8 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
-  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
+  fsl_data_path: /home/nfs/oshirekar/unsupervised_ml/data/
+  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
   input_size: 84
   bsize: 128
   eval_shots: 5
