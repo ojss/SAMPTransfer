@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: resnet18
+  arch: resnet12_wide
   conv_4_out_planes: 64
   dataset: ${data.dataset}
   optim: adam
@@ -10,9 +10,11 @@ model:
   sup_finetune_lr: 0.0001563663718906821
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
-  use_projector: False
+  use_projector: True
   use_prediction_head: True
-  projection_out_dim: 1600
+  projection_out_dim: 256
+  projection_h_dim: 2048
+  pred_h_dim: 4096
   eta_min: 5e-5
   lr: 1e-3
   lr_decay_step: 25000
@@ -23,6 +25,7 @@ model:
   n_support: 1
   n_query: 3
   queue_size: 8192
+  adapt: re_rep
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
@@ -38,7 +41,7 @@ model:
       set_negative: "hard"
     gnn_params:
       pretrained_path: "no"
-      red: 0
+      red: 1
       cat: 0
       every: 0
       gnn:
@@ -65,7 +68,7 @@ trainer:
   num_sanity_val_steps: 1
   fast_dev_run: 0
   max_epochs: 1000
-  limit_train_batches: 300
+  limit_train_batches: 200
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
@@ -82,7 +85,7 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"
-        monitor: "train_accuracy_epoch"
+        monitor: "val_accuracy_epoch"
         save_top_k: 2
         save_last: True
         every_n_epochs: 1
@@ -94,10 +97,10 @@ trainer:
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
-  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
-  input_size: 224
-  bsize: 64
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
+  input_size: 84
+  bsize: 128
   eval_shots: 5
   eval_ways: 5
   eval_query_shots: 15
-  num_workers: 0
+  num_workers: 8

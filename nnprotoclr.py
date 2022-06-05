@@ -4,7 +4,6 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple, List
 
-import kornia as K
 import numpy as np
 import pl_bolts.optimizers
 import pytorch_lightning as pl
@@ -14,10 +13,10 @@ import torch.nn.functional as F
 import torchvision
 from deepspeed.ops.adam import FusedAdam
 from lightly.data import LightlyDataset, SimCLRCollateFunction
-from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead
+from lightly.loss import NTXentLoss
+from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead, NNMemoryBankModule
 from omegaconf import OmegaConf
 from pytorch_lightning.utilities.cli import LightningCLI
-from pytorch_metric_learning import losses
 from torch.autograd import Variable
 from torch.utils.data import ConcatDataset, DataLoader
 from torchmetrics.functional import accuracy
@@ -25,7 +24,7 @@ from tqdm.auto import tqdm
 
 from clr_gat import GNN
 from dataloaders import get_episode_loader
-from feature_extractors.feature_extractor import create_model
+from feature_extractors.feature_extractor import create_model, resnet12_wide, resnet12
 from misc.dino_utils import get_rank
 from proto_utils import get_prototypes, prototypical_loss
 from utils.optimal_transport import OptimalTransport
@@ -86,9 +85,10 @@ class NNProtoCLR(pl.LightningModule):
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 arch: str,
+                 arch: Optional[str],
                  conv_4_out_planes: Optional[Union[List, int]],
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
+                 adapt: str,
                  mpnn_opts: dict,
                  mpnn_dev: str,
                  img_orig_size: Iterable,
@@ -129,6 +129,10 @@ class NNProtoCLR(pl.LightningModule):
             backbone = create_model(
                 dict(in_planes=3, out_planes=self.out_planes, num_stages=4,
                      average_end=False if conv_4_out_planes == 64 else True))
+        elif arch == "resnet12":
+            backbone = resnet12()
+        elif arch == "resnet12_wide":
+            backbone = resnet12_wide()
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
@@ -152,6 +156,7 @@ class NNProtoCLR(pl.LightningModule):
         self.temperature = temperature
 
         # PCLR Supfinetune
+        self.adapt = adapt
         self.mode = mode
         self.eval_ways = eval_ways
         self.sup_finetune = sup_finetune
@@ -194,14 +199,15 @@ class NNProtoCLR(pl.LightningModule):
             self.prediction_head = nn.Identity()
 
         # TODO: add online classifier later for training acc
-        self.classifier = nn.Linear(in_features=emb_dim, out_features=80)
-        self.classifier_lr = classifier_lr
+        # self.classifier = nn.Linear(in_features=emb_dim, out_features=80)
+        # self.classifier_lr = classifier_lr
 
         # queue
-        self.register_buffer("queue", torch.randn(self.queue_size, projection_out_dim))
-        self.register_buffer("queue_y", -torch.ones(self.queue_size, dtype=torch.long))  # idc about this right now
-        self.queue = F.normalize(self.queue, dim=1)
-        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+        self.memory_bank = NNMemoryBankModule(size=self.queue_size)
+        self.criterion = NTXentLoss(temperature=self.temperature)
+        self.w = 0.9
+        self.register_buffer("avg_output_std", torch.tensor(0.))
 
         self.automatic_optimization = True
 
@@ -345,9 +351,9 @@ class NNProtoCLR(pl.LightningModule):
             _, y = self.model(x)
         else:
             y = self.model(x).flatten(1)
-        z = y.clone()
-        z = self.projection_head(z)
+        z = self.projection_head(y)
         p = self.prediction_head(z)
+        z = z.detach()
         return y, z, p
 
     def nnclr_loss_func(self, nn: torch.Tensor, p: torch.Tensor, temperature: float = 0.1) -> torch.Tensor:
@@ -378,25 +384,29 @@ class NNProtoCLR(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        (x1, x2), targets, _ = batch
+        (x0, x1), targets, _ = batch
+        _o0, z0, p0 = self.forward(x0)
         _o1, z1, p1 = self.forward(x1)
-        _o2, z2, p2 = self.forward(x2)
-        z1 = F.normalize(z1, dim=-1)
-        z2 = F.normalize(z2, dim=-1)
 
-        idx1, nn1 = self.find_nn(z1)
-        _, nn2 = self.find_nn(z2)
+        z0 = self.memory_bank(z0, update=False)
+        z1 = self.memory_bank(z1, update=True)
 
-        loss = (
-                self.nnclr_loss_func(nn1, p2, temperature=self.temperature) / 2
-                + self.nnclr_loss_func(nn2, p1, temperature=self.temperature) / 2
-        )
+        loss = 0.5 * (self.criterion(z0, p1) + self.criterion(z1, p0))
 
-        b = targets.size(0)
-        nn_acc = (targets == self.queue_y[idx1]).sum() / b
+        z0_std = F.normalize(z0, dim=-1).std(dim=0).mean()
+        z1_std = F.normalize(z1, dim=-1).std(dim=0).mean()
+        z_std = (z0_std + z1_std) / 2
 
-        self.dequeue_and_enqueue(z1, targets)
-        self.log_dict(dict(train_loss=loss.item(), train_nn_acc=nn_acc),
+        self.log("z_std", z_std, on_step=True, on_epoch=True)
+
+        # o = p0.detach()
+        # o = F.normalize(o, dim=-1)
+        # o_std = torch.std(o, 0)
+        # o_std = o_std.mean()
+        # self.avg_output_std = self.w * self.avg_output_std + (1 - self.w) * o_std.item()
+        # collapse_level = max(0., 1 - math.sqrt(128) * self.avg_output_std)
+        # self.log("collapse_level", collapse_level, on_epoch=True)
+        self.log_dict(dict(train_loss=loss.item()),  # TODO: add nn_acc back later
                       on_epoch=True,
                       on_step=True,
                       prog_bar=True)
@@ -424,22 +434,22 @@ class NNProtoCLR(pl.LightningModule):
         x_b_i = x_query_var
         x_a_i = x_support_var
         self.eval()
-        if self.mpnn_opts["_use"]:
-            if self.mpnn_opts["adapt"] == "instance":
-                # TODO: change instance to include both x_a_i and x_b_i
-                combined = torch.cat([x_a_i, x_b_i])
-                _, combined = self.mpnn_forward(combined)
-                z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
-            elif self.mpnn_opts["adapt"] == "ot":
-                transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
-                                                         stopping_criterion=1e-4, device=self.device)
-                z_a_i = self.forward(x_a_i)
-                z_query = self.forward(x_b_i)
-                z_a_i, _ = transportation_module(z_a_i, z_query)
-            elif self.mpnn_opts["adapt"] == "re_rep":
-                combined = torch.cat([x_a_i, x_b_i])
-                _, z = self.mpnn_forward(combined)
-                z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
+        if self.adapt == "instance":
+            assert self.mpnn_opts["_use"] is True
+            # TODO: change instance to include both x_a_i and x_b_i
+            combined = torch.cat([x_a_i, x_b_i])
+            _, combined = self.mpnn_forward(combined)
+            z_a_i, _ = combined.split([len(x_a_i), len(x_b_i)])
+        elif self.adapt == "ot":
+            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                     stopping_criterion=1e-4, device=self.device)
+            z_a_i, _, _ = self.forward(x_a_i)
+            z_query, _, _ = self.forward(x_b_i)
+            z_a_i, _ = transportation_module(z_a_i, z_query)
+        elif self.adapt == "re_rep":
+            combined = torch.cat([x_a_i, x_b_i])
+            z, _, _ = self.forward(combined)
+            z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
         else:
             z_a_i = self.model(x_a_i).flatten(1)
         self.train()
@@ -451,15 +461,6 @@ class NNProtoCLR(pl.LightningModule):
         classifier.train()
         ###############################################################################################
         loss_fn = nn.CrossEntropyLoss().to(device)
-        sup_con_loss = losses.SupConLoss()
-        if use_augs:
-            augs = nn.Sequential(
-                K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
-                K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
-                K.augmentation.RandomHorizontalFlip(),
-                K.augmentation.RandomGrayscale(p=.2),
-                K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
-                                                  sigma=(0.1, 2.0)))
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
             classifier.init_params_from_prototypes(z_a_i, n_way, n_support, )
@@ -492,28 +493,23 @@ class NNProtoCLR(pl.LightningModule):
 
                 z_batch = x_a_i[selected_id]
                 y_batch = y_a_i[selected_id]
-                if use_augs:
-                    z_batch = torch.cat([z_batch, augs(z_batch)])
-                    y_batch = y_a_i[selected_id].repeat(2)
                 #####################################
-                if self.mpnn_opts["_use"]:
-                    if self.mpnn_opts["adapt"] == "instance":
-                        # lets use the entire query set?
-                        combined = torch.cat([z_batch, x_b_i])
-                        _, combined = self.mpnn_forward(combined)
-                        output, _ = combined.split([len(z_batch), len(x_b_i)])
-                    elif self.mpnn_opts["adapt"] == "re_rep":
-                        combined = torch.cat([z_batch, x_b_i])
-                        _, combined = self.mpnn_forward(combined)
-                        output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2,
-                                                      self.re_rep_temp)
+                if self.adapt == "instance":
+                    assert self.mpnn_opts["_use"] is True
+                    # lets use the entire query set?
+                    combined = torch.cat([z_batch, x_b_i])
+                    _, combined = self.mpnn_forward(combined)
+                    output, _ = combined.split([len(z_batch), len(x_b_i)])
+                elif self.adapt == "re_rep":
+                    combined = torch.cat([z_batch, x_b_i])
+                    combined, _, _ = self.forward(combined)
+                    output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2,
+                                                  self.re_rep_temp)
                 else:
                     output = self.model(z_batch).flatten(1)
 
                 preds = classifier(output)
                 loss = loss_fn(preds, y_batch)
-                if freeze_backbone is False:
-                    loss += sup_con_loss(output, y_batch)
 
                 #####################################
                 loss.backward()
@@ -527,15 +523,15 @@ class NNProtoCLR(pl.LightningModule):
 
         y_query = torch.tensor(np.repeat(range(n_way), n_query)).to(self.device)
 
-        if self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "instance":
+        if self.adapt == "instance":
+            assert self.mpnn_opts["_use"]
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
-            # todo: check if there needs to be a weight norm applied for the final classification?
-        elif self.mpnn_opts["_use"]:
-            _, output = self.mpnn_forward(x_b_i)
         else:
-            output = self.model(x_b_i).flatten(1)
+            # TODO: add re_rep here
+            output, _, _ = self.forward(x_b_i)
+        output = output.flatten(1)
         scores = classifier(output)
 
         loss = F.cross_entropy(scores, y_query, reduction='mean')
@@ -560,8 +556,6 @@ class NNProtoCLR(pl.LightningModule):
                 device=self.device,
                 n_way=self.eval_ways,
                 use_augs=self.prototune_use_augs)
-        elif self.sup_finetune == "proto_maml":
-            loss, acc = self.proto_maml(batch, batch_idx)
         elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = std_proto_form(self, batch, batch_idx)
@@ -578,7 +572,7 @@ class NNProtoCLR(pl.LightningModule):
         self.log_dict({
             'val_loss': loss.detach(),
             'val_accuracy': acc
-        }, prog_bar=True)
+        }, prog_bar=True, on_step=True, on_epoch=True)
 
         return loss.item(), acc
 

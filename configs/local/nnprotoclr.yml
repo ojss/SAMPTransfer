@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: resnet18
+  arch: resnet12_wide
   conv_4_out_planes: 64
   optim: adam
   lr_sch: step
@@ -9,9 +9,11 @@ model:
   sup_finetune_lr: 0.0001563663718906821
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
-  use_projector: False
-  use_prediction_head: False
-  projection_out_dim: 1600
+  use_projector: True
+  use_prediction_head: True
+  projection_out_dim: 256
+  projection_h_dim: 2048
+  pred_h_dim: 4096
   eta_min: 5e-5
   lr: 1e-3
   lr_decay_step: 25000
@@ -21,14 +23,14 @@ model:
   batch_size: ${data.bsize}
   n_support: 1
   n_query: 3
-  queue_size: 4096
+  queue_size: 8192
+  adapt: re_rep
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
     _use: False
     loss_cnn: False
     scaling_ce: 1
-    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -37,7 +39,7 @@ model:
       set_negative: "hard"
     gnn_params:
       pretrained_path: "no"
-      red: 0
+      red: 1
       cat: 0
       every: 0
       gnn:
@@ -61,6 +63,7 @@ model:
         use_batchnorm: 0
 trainer:
   gpus: -1
+  precision: 16
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 1500
@@ -83,12 +86,12 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-#  datapath: ../data/
+  #  datapath: ../data/
   fsl_data_path: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  data_path: /home/ojass/projects/data/processed_images/
-#  full_size_path: ../data/processed_images
-  input_size: 224
-  bsize: 64
+  data_path: /home/ojass/projects/data/miniimagenet_84/
+  #  full_size_path: ../data/processed_images
+  input_size: 84
+  bsize: 16
   eval_shots: 5
   eval_ways: 5
   eval_query_shots: 15
