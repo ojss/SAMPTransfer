@@ -68,8 +68,8 @@ trainer:
   num_sanity_val_steps: 1
   fast_dev_run: 0
   max_epochs: 1000
-  limit_train_batches: 200
   limit_val_batches: 15
+  check_val_every_n_epoch: 10
   limit_test_batches: 600
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
