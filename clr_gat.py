@@ -249,11 +249,11 @@ class CLRGAT(pl.LightningModule):
             ret = {'optimizer': opt, 'lr_scheduler': sch}
         elif self.lr_sch == 'cos_warmup':
             sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
-                                                                    warmup_epochs=self.warmup_epochs,
-                                                                    max_epochs=self.trainer.max_epochs,
+                                                                    warmup_epochs=self.warmup_epochs * self.trainer.limit_train_batches,
+                                                                    max_epochs=self.trainer.max_epochs * self.trainer.limit_train_batches,
                                                                     warmup_start_lr=self.warmup_start_lr,
                                                                     eta_min=self.eta_min)
-            ret = {'optimizer': opt, 'lr_scheduler': sch}
+            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step', 'frequency': 1}}
         elif self.lr_sch == 'step':
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
