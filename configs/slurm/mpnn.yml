@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: scl_conv4
+  arch: scl_convnet4
   out_planes: 64
   scl: True
   att_feat_dim: 80
@@ -10,7 +10,7 @@ model:
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
-  sup_finetune: prototune # [prototune, std_proto, label_cleansing, sinkhorn]
+  sup_finetune: scl # [prototune, std_proto, label_cleansing, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821
@@ -48,7 +48,7 @@ model:
   mpnn_dev: cuda
   mpnn_opts:
     _use: True
-    loss_cnn: True
+    loss_cnn: False
     scaling_ce: 1
     adapt: instance
     temperature: 0.2

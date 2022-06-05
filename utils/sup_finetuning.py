@@ -312,11 +312,11 @@ class BaselineFinetune(nn.Module):
                 l2_penalty = l2_penalty + 0.5 * (param ** 2).sum()
             loss = loss + self.alpha * l2_penalty
 
-            loss.backward()
+            loss.backward(retain_graph=True)
 
             return loss
 
         set_optimizer.step(closure)
 
-        scores = linear_clf(z_query).squeeze().softmax(1).detach().cpu().numpy()
+        scores = linear_clf(z_query).squeeze().softmax(1).detach()
         return scores

@@ -38,7 +38,7 @@ from utils.label_cleansing import label_finetuning
 from utils.optimal_transport import OptimalTransport
 from utils.rerepresentation import re_represent
 from utils.sk_finetuning import sinkhorned_finetuning
-from utils.sup_finetuning import Classifier
+from utils.sup_finetuning import Classifier, BaselineFinetune
 
 
 ######################
@@ -322,7 +322,7 @@ class CLRGAT(pl.LightningModule):
         if self.scl:
             y = torch.cat([y_support, y_query], dim=-1)
             y = einops.rearrange(y, "1 l -> l")
-            loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)  # todo: remove y if needed
+            loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)
             losses.append(loss)
             self.log("loss_spatial", loss.item())
 
@@ -641,6 +641,42 @@ class CLRGAT(pl.LightningModule):
                                                  query_features)
         return y_query, y_query_pred
 
+    @torch.enable_grad()
+    def scl_finetuning(self, batch, batch_idx):
+        x_support = batch['train'][0][0]  # only take data & only first batch
+        x_support = x_support.to(self.device)
+        x_support_var = Variable(x_support)
+        x_query = batch['test'][0][0]  # only take data & only first batch
+        x_query = x_query.to(self.device)
+        x_query_var = Variable(x_query)
+        n_support = x_support.shape[0] // self.eval_ways
+        n_query = x_query.shape[0] // self.eval_ways
+
+        batch_size = self.eval_ways
+        support_size = self.eval_ways * n_support
+        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
+        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
+
+        augs = nn.Sequential(K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
+                             K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
+                             K.augmentation.RandomHorizontalFlip(),
+                             K.augmentation.RandomGrayscale(p=.2),
+                             K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
+                                                               sigma=(0.1, 2.0)))
+        aug_supp = torch.cat([augs(x_support_var) for _ in range(5)])
+        x_support_var = torch.cat([x_support_var, aug_supp])
+        y_supp = y_supp.repeat(5 + 1)
+        x = torch.cat([x_support_var, x_query_var])
+        _, spatial_f, _, z = self.scl_mpnn_forward(x)
+        z_support, z_query = z.split([len(x_support_var), len(x_query_var)])
+        finetuner = BaselineFinetune(n_ways=self.eval_ways, n_shots=n_support, n_aug_support_samples=5, n_queries=15,
+                                     feat_dim=z.shape[-1])
+        scores = finetuner.forward(z_support, y_supp, z_query, False, True)
+        loss = F.cross_entropy(scores, y_query, reduction='mean')
+        predictions = scores.argmax(dim=1)
+        acc = accuracy(predictions, y_query)
+        return loss, acc
+
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
         acc = 0.
@@ -670,6 +706,9 @@ class CLRGAT(pl.LightningModule):
                                               freeze_backbone=self.ft_freeze_backbone,
                                               finetune_batch_norm=self.finetune_batch_norm, n_way=self.eval_ways,
                                               inner_lr=self.sup_finetune_lr)
+        elif self.sup_finetune == "scl":
+            loss, acc = self.scl_finetuning(batch, batch_idx)
+
         self.load_state_dict(original_encoder_state)
         return loss, acc
 
@@ -678,7 +717,7 @@ class CLRGAT(pl.LightningModule):
         self.log_dict({
             'val_loss': loss.detach(),
             'val_accuracy': acc
-        }, prog_bar=True)
+        }, prog_bar=True, on_step=True, on_epoch=True)
 
         return loss.item(), acc
 
