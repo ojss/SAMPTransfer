@@ -337,7 +337,8 @@ class NNProtoCLR(pl.LightningModule):
         ret["optimizer"] = opt
 
         if self.lr_sch == 'cos':
-            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.estimated_stepping_batches)
+            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt,
+                                                             self.trainer.max_epochs * self.trainer.limit_train_batches)
             ret = {'optimizer': opt, 'lr_scheduler': sch}
         elif self.lr_sch == 'cos_warmup':
             sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
