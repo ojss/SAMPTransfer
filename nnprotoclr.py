@@ -4,6 +4,7 @@ import copy
 import uuid
 from typing import Optional, Iterable, Union, Tuple, List
 
+import einops
 import numpy as np
 import pl_bolts.optimizers
 import pytorch_lightning as pl
@@ -13,9 +14,9 @@ import torch.nn.functional as F
 import torchvision
 from deepspeed.ops.adam import FusedAdam
 from lightly.data import LightlyDataset, SimCLRCollateFunction
-from lightly.loss import NTXentLoss
-from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead, NNMemoryBankModule
+from lightly.models.modules import NNCLRProjectionHead, NNCLRPredictionHead
 from omegaconf import OmegaConf
+from pl_bolts.optimizers import LARS
 from pytorch_lightning.utilities.cli import LightningCLI
 from torch.autograd import Variable
 from torch.utils.data import ConcatDataset, DataLoader
@@ -23,9 +24,8 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 from clr_gat import GNN
-from dataloaders import get_episode_loader
+from dataloaders import get_episode_loader, UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model, resnet12_wide, resnet12
-from misc.dino_utils import get_rank
 from proto_utils import get_prototypes, prototypical_loss
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
@@ -198,16 +198,15 @@ class NNProtoCLR(pl.LightningModule):
         else:
             self.prediction_head = nn.Identity()
 
-        # TODO: add online classifier later for training acc
-        # self.classifier = nn.Linear(in_features=emb_dim, out_features=80)
-        # self.classifier_lr = classifier_lr
+        self.classifier = nn.Linear(in_features=emb_dim, out_features=80)
+        self.classifier_lr = classifier_lr
 
         # queue
-
-        self.memory_bank = NNMemoryBankModule(size=self.queue_size)
-        self.criterion = NTXentLoss(temperature=self.temperature)
-        self.w = 0.9
-        self.register_buffer("avg_output_std", torch.tensor(0.))
+        self.register_buffer("queue", torch.randn(self.queue_size, projection_out_dim))
+        self.register_buffer("queue_y", -torch.ones(self.queue_size, dtype=torch.long))
+        if self.distance == "cosine":
+            self.queue = F.normalize(self.queue, dim=1)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
         self.automatic_optimization = True
 
@@ -244,10 +243,28 @@ class NNProtoCLR(pl.LightningModule):
             Tuple[torch.Tensor, torch.Tensor]:
                 indices and projected features of the nearest neighbors.
         """
-
-        idx = (z @ self.queue.T).max(dim=1)[1]
-        nearest_neighbour = self.queue[idx]
+        if self.distance == "cosine":
+            idx = (z @ self.queue.T).max(dim=1)[1]
+            nearest_neighbour = self.queue[idx]
+        elif self.distance == "euclidean":
+            idx = torch.cdist(z, self.queue).max(dim=1)[1]
+            nearest_neighbour = self.queue[idx]
         return idx, nearest_neighbour
+
+    @property
+    def learnable_params(self):
+
+        return [
+            {"name": "backbone", "params": self.model.parameters()},
+            {"params": self.projection_head.parameters()},
+            {"params": self.prediction_head.parameters()},
+            {
+                "name": "classifier",
+                "params": self.classifier.parameters(),
+                "lr": self.classifier_lr,
+                "weight_decay": 0,
+            },
+        ]
 
     def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
         loss_cnn = 0.
@@ -277,8 +294,8 @@ class NNProtoCLR(pl.LightningModule):
         else:
             z_proto = get_prototypes(z_support, y_support, ways)
 
-        loss, acc = prototypical_loss(z_proto, z_query, y_query,
-                                      distance=self.distance, loss_fn=loss_fn, temperature=temperature)
+        loss, acc = prototypical_loss(z_proto, z_query, y_query, distance=self.distance, loss_fn=loss_fn,
+                                      temperature=temperature)
         return loss, acc
 
     @staticmethod
@@ -302,7 +319,7 @@ class NNProtoCLR(pl.LightningModule):
         return z_support, z_query
 
     def configure_optimizers(self):
-        parameters = filter(lambda p: p.requires_grad, self.parameters())
+        parameters = self.learnable_params
         ret = {}
         if self.optim == 'sgd':
             opt = torch.optim.SGD(parameters, lr=self.lr, momentum=.9, weight_decay=self.weight_decay,
@@ -314,16 +331,18 @@ class NNProtoCLR(pl.LightningModule):
                 opt = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         elif self.optim == 'radam':
             opt = torch.optim.RAdam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        elif self.optim == "lars":
+            opt = LARS(self.learnable_params, lr=self.lr, momentum=0.9, weight_decay=self.weight_decay, nesterov=True)
 
         ret["optimizer"] = opt
 
         if self.lr_sch == 'cos':
-            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.max_epochs)
+            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.estimated_stepping_batches)
             ret = {'optimizer': opt, 'lr_scheduler': sch}
         elif self.lr_sch == 'cos_warmup':
             sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
-                                                                    warmup_epochs=self.warmup_epochs,
-                                                                    max_epochs=self.trainer.max_epochs,
+                                                                    warmup_epochs=self.warmup_epochs * self.trainer.num_training_batches,
+                                                                    max_epochs=self.trainer.estimated_stepping_batches,
                                                                     warmup_start_lr=self.warmup_start_lr,
                                                                     eta_min=self.eta_min)
             ret = {'optimizer': opt, 'lr_scheduler': sch}
@@ -332,8 +351,7 @@ class NNProtoCLR(pl.LightningModule):
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         elif self.lr_sch == "one_cycle":
             sch = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=self.lr,
-                                                      steps_per_epoch=self.trainer.limit_train_batches,
-                                                      epochs=self.trainer.max_epochs)
+                                                      total_steps=self.trainer.estimated_stepping_batches)
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
@@ -353,64 +371,63 @@ class NNProtoCLR(pl.LightningModule):
             y = self.model(x).flatten(1)
         z = self.projection_head(y)
         p = self.prediction_head(z)
-        z = z.detach()
+        # z = z.detach()
         return y, z, p
 
-    def nnclr_loss_func(self, nn: torch.Tensor, p: torch.Tensor, temperature: float = 0.1) -> torch.Tensor:
-        """Computes NNCLR's loss given batch of nearest-neighbors nn from view 1 and
-        predicted features p from view 2.
-
-        Args:
-            nn (torch.Tensor): NxD Tensor containing nearest neighbors' features from view 1.
-            p (torch.Tensor): NxD Tensor containing predicted features from view 2
-            temperature (float, optional): temperature of the softmax in the contrastive loss. Defaults
-                to 0.1.
-
-        Returns:
-            torch.Tensor: NNCLR loss.
-        """
-
-        nn = F.normalize(nn, dim=-1)
-        p = F.normalize(p, dim=-1)
-        # to be consistent with simclr, we now gather p
-        # this might result in suboptimal results given previous parameters.
-
-        logits = nn @ p.T / temperature
-
-        rank = get_rank()
-        n = nn.size(0)
-        labels = torch.arange(n * rank, n * (rank + 1), device=p.device)
-        loss = F.cross_entropy(logits, labels)
-        return loss
-
     def training_step(self, batch, batch_idx):
-        (x0, x1), targets, _ = batch
-        _o0, z0, p0 = self.forward(x0)
-        _o1, z1, p1 = self.forward(x1)
+        x0 = batch['origs']
+        x1 = batch['views']
+        targets = batch['labels']
+        x0 = x0.unsqueeze(0)
+        batch_size = x0.size(0)
+        ways = x0.size(1)
+        x_support = einops.rearrange(x0, '1 b 1 c h w -> b c h w')
+        x_query = einops.rearrange(x1, 'b q c h w -> (b q) c h w')
 
-        z0 = self.memory_bank(z0, update=False)
-        z1 = self.memory_bank(z1, update=True)
+        # Create dummy query labels
+        y_query = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+        y_query = y_query.repeat(batch_size, 1, self.n_query)
+        y_query = y_query.view(batch_size, -1).to(self.device)
 
-        loss = 0.5 * (self.criterion(z0, p1) + self.criterion(z1, p0))
+        y_support = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+        y_support = y_support.repeat(batch_size, 1, self.n_support)
+        y_support = y_support.view(batch_size, -1).to(self.device)
+
+        _o0, z0, p0 = self.forward(x_support)
+        _o1, z1, p1 = self.forward(x_query)
+        if self.distance == "cosine":
+            z0 = F.normalize(z0, dim=-1)
+            z1 = F.normalize(z1, dim=-1)
+
+        idx0, nn0 = self.find_nn(z0)
+        # add nearest neighbours of original views into x_query
+        z1 = torch.cat([z1, nn0])
+        y_query = torch.cat([y_query, y_support], dim=-1)
+        z0 = einops.rearrange(z0, 'b e -> 1 b e')
+        z1 = einops.rearrange(z1, 'b e -> 1 b e')
+
+        loss, acc = prototypical_loss(z0, z1, y_query, distance=self.distance, temperature=self.temperature)
+
+        # dequeue and enqueue, only storing support samples right now
+        z0.squeeze_(0)
+        z1.squeeze_(0)
+        self.dequeue_and_enqueue(z0, targets[:, 0])
 
         z0_std = F.normalize(z0, dim=-1).std(dim=0).mean()
         z1_std = F.normalize(z1, dim=-1).std(dim=0).mean()
         z_std = (z0_std + z1_std) / 2
 
-        self.log("z_std", z_std, on_step=True, on_epoch=True)
+        scores = self.classifier.forward(_o0.detach())
+        targets = targets[:, 0]
+        class_loss = F.cross_entropy(scores, targets.long())
+        class_acc = accuracy(scores, targets)
 
-        # o = p0.detach()
-        # o = F.normalize(o, dim=-1)
-        # o_std = torch.std(o, 0)
-        # o_std = o_std.mean()
-        # self.avg_output_std = self.w * self.avg_output_std + (1 - self.w) * o_std.item()
-        # collapse_level = max(0., 1 - math.sqrt(128) * self.avg_output_std)
-        # self.log("collapse_level", collapse_level, on_epoch=True)
-        self.log_dict(dict(train_loss=loss.item()),  # TODO: add nn_acc back later
+        self.log_dict(dict(class_acc=class_acc, class_loss=class_loss, z_std=z_std), on_epoch=True, on_step=True)
+        self.log_dict(dict(train_loss=loss.item()),
                       on_epoch=True,
                       on_step=True,
                       prog_bar=True)
-        return loss
+        return loss + class_loss
 
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
@@ -601,7 +618,7 @@ class NNProtoCLR(pl.LightningModule):
 def cli_main():
     UUID = uuid.uuid4()
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
-    cli = LightningCLI(NNProtoCLR, NNProtoCLRDataModule, run=False,
+    cli = LightningCLI(NNProtoCLR, UnlabelledDataModule, run=False,
                        save_config_overwrite=True,
                        parser_kwargs={"parser_mode": "omegaconf"})
     cli.trainer.fit(cli.model, cli.datamodule)
@@ -611,7 +628,7 @@ def cli_main():
 def slurm_main(conf_path, UUID):
     OmegaConf.register_new_resolver("uuid", lambda: str(UUID))
     print(conf_path)
-    cli = LightningCLI(NNProtoCLR, NNProtoCLRDataModule, run=False,
+    cli = LightningCLI(NNProtoCLR, UnlabelledDataModule, run=False,
                        save_config_overwrite=True,
                        save_config_filename=str(UUID),
                        parser_kwargs={"parser_mode": "omegaconf", "default_config_files": [conf_path]})
