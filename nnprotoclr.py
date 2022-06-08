@@ -410,8 +410,8 @@ class NNProtoCLR(pl.LightningModule):
         loss, acc = prototypical_loss(z0, z1, y_query, distance=self.distance, temperature=self.temperature)
         nn_acc = (targets[:, 0] == self.queue_y[idx0]).sum() / ways
         # dequeue and enqueue, only storing support samples right now
-        z0.squeeze_(0)
-        z1.squeeze_(0)
+        z0 = z0.squeeze(0)
+        z1 = z1.squeeze(0)
         self.dequeue_and_enqueue(z0, targets[:, 0])
 
         z0_std = F.normalize(z0, dim=-1).std(dim=0).mean()
