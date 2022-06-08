@@ -423,7 +423,7 @@ class NNProtoCLR(pl.LightningModule):
         class_acc = accuracy(scores, targets)
 
         self.log_dict(dict(class_acc=class_acc, class_loss=class_loss, z_std=z_std), on_epoch=True, on_step=True)
-        self.log_dict(dict(train_loss=loss.item()),
+        self.log_dict(dict(train_loss=loss.item(), acc=acc),
                       on_epoch=True,
                       on_step=True,
                       prog_bar=True)
