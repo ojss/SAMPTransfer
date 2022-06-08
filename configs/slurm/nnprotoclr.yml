@@ -2,26 +2,27 @@ seed_everything: 72
 model:
   arch: resnet12_wide
   conv_4_out_planes: 64
+  classifier_lr: 0.2
   dataset: ${data.dataset}
   optim: adam
-  lr_sch: step
+  lr_sch: cos
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   use_projector: True
-  use_prediction_head: True
+  use_prediction_head: False
   projection_out_dim: 256
   projection_h_dim: 2048
   pred_h_dim: 4096
   eta_min: 5e-5
-  lr: 1e-3
+  lr: 1e-1
   lr_decay_step: 25000
   lr_decay_rate: 0.5
-  weight_decay: 6.059722614369727e-06
+  weight_decay: 1e-5
   img_orig_size: [ 84, 84 ]
-  batch_size: ${data.bsize}
+  batch_size: ${data.batch_size}
   n_support: 1
   n_query: 3
   queue_size: 8192
@@ -67,9 +68,10 @@ trainer:
   gpus: -1
   num_sanity_val_steps: 1
   fast_dev_run: 0
-  max_epochs: 1000
+  max_epochs: 800
+  limit_train_batches: 200
   limit_val_batches: 15
-  check_val_every_n_epoch: 10
+  check_val_every_n_epoch: 5
   limit_test_batches: 600
   logger:
     class_path: pytorch_lightning.loggers.WandbLogger
@@ -93,14 +95,15 @@ trainer:
     - class_path: pytorch_lightning.callbacks.LearningRateMonitor
       init_args:
         logging_interval: "step"
-
 data:
   dataset: "miniimagenet"
-  fsl_data_path: /home/nfs/oshirekar/unsupervised_ml/data/
-  data_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
-  input_size: 84
-  bsize: 128
-  eval_shots: 5
-  eval_ways: 5
-  eval_query_shots: 15
+  datapath: /home/nfs/oshirekar/unsupervised_ml/data/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
+  n_support: 1
+  n_query: 3
+  batch_size: 64
   num_workers: 8
+  tfm_method: vicreg
+  img_size_orig: [ 84, 84 ]
+  img_size_crop: [ 84, 84 ]
+  no_aug_support: True
