@@ -407,7 +407,7 @@ class NNProtoCLR(pl.LightningModule):
         z1 = einops.rearrange(z1, 'b e -> 1 b e')
 
         loss, acc = prototypical_loss(z0, z1, y_query, distance=self.distance, temperature=self.temperature)
-
+        nn_acc = (targets[:, 0] == self.queue_y[idx0]).sum() / ways
         # dequeue and enqueue, only storing support samples right now
         z0.squeeze_(0)
         z1.squeeze_(0)
@@ -422,7 +422,8 @@ class NNProtoCLR(pl.LightningModule):
         class_loss = F.cross_entropy(scores, targets.long())
         class_acc = accuracy(scores, targets)
 
-        self.log_dict(dict(class_acc=class_acc, class_loss=class_loss, z_std=z_std), on_epoch=True, on_step=True)
+        self.log_dict(dict(class_acc=class_acc, class_loss=class_loss, z_std=z_std, nn_acc=nn_acc), on_epoch=True,
+                      on_step=True)
         self.log_dict(dict(train_loss=loss.item(), acc=acc),
                       on_epoch=True,
                       on_step=True,
