@@ -521,7 +521,7 @@ class CLRGAT(pl.LightningModule):
         _, predictions = torch.max(scores, dim=1)
         # acc = torch.mean(predictions.eq(y_query).float())
         acc = accuracy(predictions, y_query)
-        return loss, acc.item()
+        return loss.detach().item(), acc.item()
 
     def std_proto_form(self, batch, batch_idx, sot=False):
         x_support = batch["train"][0]
@@ -616,7 +616,10 @@ class CLRGAT(pl.LightningModule):
         loss = F.cross_entropy(scores, y_query, reduction='mean')
         predictions = scores.argmax(dim=1)
         acc = accuracy(predictions, y_query)
-        return loss, acc
+        return loss.detach().item(), acc
+
+    def hms(self, instance_embs):
+        pass
 
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.

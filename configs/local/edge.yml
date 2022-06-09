@@ -11,7 +11,7 @@ model:
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
-  sup_finetune: label_cleansing # [prototune, std_proto, label_cleansing, sinkhorn]
+  sup_finetune: ot # [prototune, std_proto, label_cleansing, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821
@@ -26,7 +26,7 @@ model:
   projector_h_dim: 6400
   projector_out_dim: 1600
   label_cleansing_opts:
-    use: True
+    use: False
     n_test_runs: 1000
     n_ways: 5
     n_shots: 5
