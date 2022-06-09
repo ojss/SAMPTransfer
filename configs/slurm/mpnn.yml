@@ -2,7 +2,8 @@ seed_everything: 72
 model:
   arch: conv4
   out_planes: 64
-  scl: True
+  scl: false
+  distance: euclidean
   att_feat_dim: 80
   gnn_type: gat
   optim: adam
