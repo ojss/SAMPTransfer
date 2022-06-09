@@ -23,11 +23,11 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
+import feature_extractors
 from SCL.losses import ContrastiveLoss
 from SCL.models.attention import AttentionSimilarity
 from SCL.models.contrast import ContrastResNet
 from dataloaders import UnlabelledDataModule
-import feature_extractors
 from feature_extractors.feature_extractor import create_model
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
@@ -294,7 +294,7 @@ class CLRGAT(pl.LightningModule):
                                                    temperature=self.mpnn_temperature)
             loss *= self.mpnn_opts["scaling_ce"]
             losses.append(loss)
-            self.log("loss_cnn", loss.item())
+            self.log("train/loss_cnn", loss.item())
 
         loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
                                                  ways, loss_fn=self.gnn_loss,
@@ -312,13 +312,13 @@ class CLRGAT(pl.LightningModule):
                                                    temperature=self.mpnn_temperature)
             loss *= self.mpnn_opts["scaling_ce"]
             losses.append(loss)
-            self.log("loss_cnn", loss.item())
+            self.log("train/loss_cnn", loss.item())
         if self.scl:
             y = torch.cat([y_support, y_query], dim=-1)
             y = einops.rearrange(y, "1 l -> l")
             loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)
             losses.append(loss)
-            self.log("loss_spatial", loss.item())
+            self.log("train/loss_spatial", loss.item())
 
         loss, acc = self.calculate_protoclr_loss(gnn_out, y_support, y_query,
                                                  ways, loss_fn=self.gnn_loss,
@@ -660,32 +660,13 @@ class CLRGAT(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
-        self.log_dict({
-            'val/loss': loss,
-            'val/accuracy': acc
-        }, prog_bar=True, on_step=True, on_epoch=True)
-
+        self.log_dict({'val/loss': loss, 'val/accuracy': acc}, prog_bar=True, on_step=True, on_epoch=True)
         return loss, acc
 
     def test_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
-
-        self.log(
-            "test/loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-        )
-        self.log(
-            "test/acc",
-            acc,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-        )
+        self.log("test/loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("test/acc", acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, )
         return loss, acc
 
 
