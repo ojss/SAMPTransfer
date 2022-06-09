@@ -378,7 +378,7 @@ class CLRGAT(pl.LightningModule):
             loss, acc, z = self.scl_forward_pass(x_support, x_query, y_support, y_query, ways)
         else:
             loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
-        self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
+        self.log_dict({'train/loss': loss.item(), 'train/accuracy': acc}, prog_bar=True, on_epoch=True)
 
         return {"loss": loss, "accuracy": acc}
 
@@ -648,7 +648,7 @@ class CLRGAT(pl.LightningModule):
                                               finetune_batch_norm=self.finetune_batch_norm, n_way=self.eval_ways,
                                               inner_lr=self.sup_finetune_lr)
         elif self.sup_finetune == "sot":
-            self.std_proto_form(batch, batch_idx, sot=True)
+            loss, acc = self.std_proto_form(batch, batch_idx, sot=True)
         elif self.sup_finetune == "scl":
             loss, acc = self.scl_finetuning(batch, batch_idx)
 
@@ -658,8 +658,8 @@ class CLRGAT(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
         self.log_dict({
-            'val_loss': loss,
-            'val_accuracy': acc
+            'val/loss': loss,
+            'val/accuracy': acc
         }, prog_bar=True, on_step=True, on_epoch=True)
 
         return loss, acc
@@ -668,7 +668,7 @@ class CLRGAT(pl.LightningModule):
         loss, acc = self._shared_eval_step(batch, batch_idx)
 
         self.log(
-            "test_loss",
+            "test/loss",
             loss,
             on_step=True,
             on_epoch=True,
@@ -676,7 +676,7 @@ class CLRGAT(pl.LightningModule):
             logger=True,
         )
         self.log(
-            "test_acc",
+            "test/acc",
             acc,
             on_step=True,
             on_epoch=True,
