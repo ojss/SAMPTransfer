@@ -14,6 +14,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from PIL import Image, ImageFilter, ImageOps
+from pl_bolts.transforms.self_supervised import RandomTranslateWithReflect
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
@@ -333,6 +334,8 @@ class Solarization(object):
 def get_transforms(method, img_size):
     if method == "vicreg":
         return vicreg_transforms(img_size)
+    elif method == "amdim":
+        return AMDIM_transforms(img_size)
 
 
 def vicreg_transforms(img_size):
@@ -361,6 +364,25 @@ def vicreg_transforms(img_size):
     )
 
     return tfms
+
+
+def AMDIM_transforms(image_size):
+    # flip_lr = transforms.RandomHorizontalFlip(p=0.5)
+    # col_jitter = transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8)
+    # img_jitter = transforms.RandomApply([RandomTranslateWithReflect(4)], p=0.8)
+    # rnd_gray = transforms.RandomGrayscale(p=0.25)
+    transforms_list = [
+        transforms.RandomResizedCrop(image_size),
+        transforms.RandomHorizontalFlip(p=0.5),
+        # flip_lr,
+        transforms.RandomApply([RandomTranslateWithReflect(4)], p=0.8),
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8),
+        transforms.RandomGrayscale(p=0.25),
+        transforms.ToTensor(),
+        # transforms.Normalize(np.array([0.485, 0.456, 0.406]),
+        #                      np.array([0.229, 0.224, 0.225]))
+    ]
+    return transforms_list
 
 
 def identity_transform(img_shape):
