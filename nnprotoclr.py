@@ -620,8 +620,8 @@ class NNProtoCLR(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
         self.log_dict({
-            'val_loss': loss.detach(),
-            'val_accuracy': acc
+            'val/loss': loss.detach(),
+            'val/accuracy': acc
         }, prog_bar=True, on_step=True, on_epoch=True)
 
         return loss.item(), acc
@@ -630,7 +630,7 @@ class NNProtoCLR(pl.LightningModule):
         loss, acc = self._shared_eval_step(batch, batch_idx)
 
         self.log(
-            "test_loss",
+            "test/loss",
             loss.detach().item(),
             on_step=True,
             on_epoch=True,
@@ -638,7 +638,7 @@ class NNProtoCLR(pl.LightningModule):
             logger=True,
         )
         self.log(
-            "test_acc",
+            "test/acc",
             acc,
             on_step=True,
             on_epoch=True,
