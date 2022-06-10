@@ -106,6 +106,7 @@ class CLRGAT(pl.LightningModule):
     def __init__(self,
                  arch: str,
                  out_planes: Union[Iterable, int],
+                 average_end: bool,
                  n_support,
                  n_query,
                  batch_size,
@@ -116,6 +117,7 @@ class CLRGAT(pl.LightningModule):
                  mpnn_dev: str,
                  img_orig_size: Iterable,
                  label_cleansing_opts: dict,
+                 use_hms: bool,
                  use_projector: bool,
                  projector_h_dim: int,
                  projector_out_dim: int,
@@ -133,7 +135,6 @@ class CLRGAT(pl.LightningModule):
                  distance='euclidean',
                  eval_ways=5,
                  sup_finetune="prototune",
-                 prototune_use_augs=False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
@@ -153,7 +154,8 @@ class CLRGAT(pl.LightningModule):
         if feature_extractor is not None:
             backbone = feature_extractor
         elif arch == "conv4":
-            backbone = create_model(dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=True))
+            backbone = create_model(
+                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=average_end))
         elif "scl" in arch and self.scl:
             model_name = arch.replace("scl_", "")
             in_dim = hidden_size = 64
@@ -189,10 +191,11 @@ class CLRGAT(pl.LightningModule):
         self.projector_h_dim = projector_h_dim
         self.projector_out_dim = projector_out_dim
 
+        self.use_hms = use_hms
+
         # PCLR Supfinetune
         self.eval_ways = eval_ways
         self.sup_finetune = sup_finetune
-        self.prototune_use_augs = prototune_use_augs
         self.sup_finetune_lr = sup_finetune_lr
         self.sup_finetune_epochs = sup_finetune_epochs
         self.ft_freeze_backbone = ft_freeze_backbone
@@ -300,6 +303,8 @@ class CLRGAT(pl.LightningModule):
                                                  ways, loss_fn=self.gnn_loss,
                                                  temperature=self.mpnn_temperature)
         losses.append(loss)
+        if self.use_hms:
+            losses.append(self.hms(z, y_support, y_query))
         loss = sum(losses)
         return loss, acc, z
 
@@ -340,8 +345,8 @@ class CLRGAT(pl.LightningModule):
         else:
             z_proto = get_prototypes(z_support, y_support, ways)
 
-        loss, acc = prototypical_loss(z_proto, z_query, y_query,
-                                      distance=self.distance, loss_fn=loss_fn, temperature=temperature)
+        loss, acc, _ = prototypical_loss(z_proto, z_query, y_query,
+                                         distance=self.distance, loss_fn=loss_fn, temperature=temperature)
         return loss, acc
 
     def training_step(self, batch, batch_idx):
@@ -385,7 +390,7 @@ class CLRGAT(pl.LightningModule):
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
                   freeze_backbone=False, finetune_batch_norm=False,
-                  inner_lr=0.001, total_epoch=15, n_way=5, use_augs=False):
+                  inner_lr=0.001, total_epoch=15, n_way=5):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -447,6 +452,7 @@ class CLRGAT(pl.LightningModule):
         # Initialise as distance classifer (distance to prototypes)
         if proto_init:
             classifier.init_params_from_prototypes(z_a_i, n_way, n_support, z_proto=proto)
+        # w_norm = nn.utils.weight_norm(classifier.fc)
         classifier_opt = torch.optim.Adam(classifier.parameters(), lr=inner_lr)
         if freeze_backbone is False:
             delta_opt = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()), lr=self.lr)
@@ -476,7 +482,7 @@ class CLRGAT(pl.LightningModule):
                 y_batch = y_a_i[selected_id]
 
                 #####################################
-                if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot"]:
+                if self.mpnn_opts["adapt"] in ["task", "proto_only", "ot", "sot"]:
                     output = self.forward(z_batch)
                 elif self.mpnn_opts["adapt"] == "instance":
                     # lets use the entire query set?
@@ -484,7 +490,7 @@ class CLRGAT(pl.LightningModule):
                     combined = self.forward(combined)
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
                 else:
-                    output = self.model(z_batch).flatten(1)
+                    output, _ = self.model(z_batch).flatten(1)
 
                 preds = classifier(output)
                 loss = loss_fn(preds, y_batch)
@@ -513,6 +519,12 @@ class CLRGAT(pl.LightningModule):
             combined = torch.cat([x_a_i, x_b_i])
             combined = self.forward(combined)
             _, output = combined.split([len(x_a_i), len(x_b_i)])
+        elif self.mpnn_opts["adapt"] == "ot":
+            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                     stopping_criterion=1e-4, device=self.device)
+            z_a_i = self.forward(x_a_i)
+            z_query = self.forward(x_b_i)
+            z_a_i, output = transportation_module(z_a_i, z_query)
         else:
             output = self.forward(x_b_i)
         scores = classifier(output)
@@ -556,7 +568,7 @@ class CLRGAT(pl.LightningModule):
         # Calucalte prototypes
         z_proto = get_prototypes(z_support, y_support, self.eval_ways)
         # Calculate loss and accuracies
-        loss, acc = prototypical_loss(z_proto, z_query, y_query, distance=self.distance)
+        loss, acc, _ = prototypical_loss(z_proto, z_query, y_query, distance=self.distance)
         return loss, acc
 
     @torch.enable_grad()
@@ -575,8 +587,13 @@ class CLRGAT(pl.LightningModule):
         y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
         y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
         z = self.forward(torch.cat([x_support_var, x_query_var]))
-        support_features, query_features = re_represent(z, support_size, .5, .5, .07)
-        # support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
+        if self.mpnn_opts["adapt"] == "re_rep":
+            support_features, query_features = re_represent(z, support_size, .5, .5, .07)
+        elif self.mpnn_opts["adapt"] == "sot":
+            sot = SOT(distance_metric=self.distance)
+            z = sot.forward(z, n_samples=n_support + n_query, y_support=y_supp)
+            support_features, query_features = z.split([len(x_support_var), len(x_query_var)])
+
         self.label_cleansing_opts["n_ways"] = self.eval_ways
         y_query, y_query_pred = label_finetuning(self.label_cleansing_opts, support_features, y_supp, y_query,
                                                  query_features)
@@ -618,8 +635,57 @@ class CLRGAT(pl.LightningModule):
         acc = accuracy(predictions, y_query)
         return loss.detach().item(), acc
 
-    def hms(self, instance_embs):
-        pass
+    def hms(self, instance_embs, y_support, y_query):
+        sim = self.similarity(instance_embs.detach(), instance_embs.detach())
+        way = self.batch_size
+
+        sim.fill_diagonal_(-1e4)
+        k = 8
+        _, topk = torch.topk(sim, k=k, dim=-1, sorted=False)
+
+        c = torch.from_numpy(np.random.uniform(0., .5, (instance_embs.size(0), k))).float().to(self.device)
+        c = c.view(*(c.shape + (1,) * (instance_embs.dim() - 1)))
+
+        mixed_emb = (1 - c) * instance_embs[topk] + c * instance_embs.unsqueeze(1)
+        z_supp, z_query = instance_embs[:way * self.n_support], instance_embs[way * self.n_support:]
+        _, _, logits = prototypical_loss(z_supp.unsqueeze(0), z_query.unsqueeze(0), y_query, distance=self.distance)
+
+        z_query = einops.rearrange(z_query, "(nq nw) e -> 1 nq nw e", nq=self.n_query, nw=self.batch_size)
+        mixed_neg = mixed_emb[way * self.n_support:]
+        mixed_neg = einops.rearrange(mixed_neg, "(nq nw) k e -> 1 nq nw k e", nq=self.n_query, nw=self.batch_size, k=k)
+        mixed_neg_logits = self.mix_neg_logits(mixed_neg, z_query).view(k, -1).unsqueeze(0)
+        logits = torch.cat([logits, mixed_neg_logits], dim=1)
+
+        hms_loss = F.cross_entropy(logits, y_query)
+
+        return hms_loss
+
+    def similarity(self, support, query):
+        if self.distance == 'euclidean':
+            s = support.unsqueeze(0)
+            q = query.unsqueeze(1)
+            sim = -torch.sum((s - q) ** 2, dim=-1)
+        else:
+            if self.distance == 'sns':
+                support = F.normalize(support, dim=-1)  # normalize for cosine distance
+            elif self.distance == 'cosine':
+                support = F.normalize(support, dim=-1)  # normalize for cosine distance
+                query = F.normalize(query, dim=-1)
+            sim = torch.einsum('ik,jk->ij', query, support)
+        return sim
+
+    def mix_neg_logits(self, support, query):
+        if self.distance == 'euclidean':
+            query = query.unsqueeze(3)
+            sim = -torch.sum((support - query) ** 2, dim=-1)
+        else:
+            if self.distance == 'sns':
+                support = F.normalize(support, dim=-1)  # normalize for cosine distance
+            elif self.distance == 'cosine':
+                support = F.normalize(support, dim=-1)  # normalize for cosine distance
+                query = F.normalize(query, dim=-1)
+            sim = torch.einsum('ijke,ijkle->ijkl', query, support)
+        return sim
 
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
@@ -635,8 +701,7 @@ class CLRGAT(pl.LightningModule):
                 freeze_backbone=self.ft_freeze_backbone,
                 finetune_batch_norm=self.finetune_batch_norm,
                 device=self.device,
-                n_way=self.eval_ways,
-                use_augs=self.prototune_use_augs)
+                n_way=self.eval_ways)
         elif self.sup_finetune == "label_cleansing":
             y_query, y_query_pred = self.lab_cleaning(batch, batch_idx)
             y_query, y_query_pred = [torch.Tensor(t) for t in [y_query, y_query_pred]]

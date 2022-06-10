@@ -2,8 +2,9 @@ seed_everything: 72
 model:
   arch: conv4
   out_planes: 64
+  average_end: false
   scl: false
-  distance: euclidean
+  distance: sns
   att_feat_dim: 80
   gnn_type: gat
   optim: adam
@@ -11,7 +12,7 @@ model:
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
-  sup_finetune: sot # [prototune, std_proto, label_cleansing, sinkhorn]
+  sup_finetune: prototune # [prototune, std_proto, label_cleansing, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
   lr: 0.0001563663718906821
@@ -25,6 +26,7 @@ model:
   use_projector: False
   projector_h_dim: 6400
   projector_out_dim: 1600
+  use_hms: True
   label_cleansing_opts:
     use: False
     n_test_runs: 1000
@@ -51,7 +53,7 @@ model:
     _use: True
     loss_cnn: False
     scaling_ce: 1
-    adapt: instance
+    adapt: ot
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
