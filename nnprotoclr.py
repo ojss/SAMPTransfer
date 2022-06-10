@@ -30,6 +30,7 @@ from proto_utils import get_prototypes, prototypical_loss
 from utils.optimal_transport import OptimalTransport
 from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
+import torch.distributed as dist
 
 
 class NNProtoCLRDataModule(pl.LightningDataModule):
@@ -87,7 +88,9 @@ class NNProtoCLR(pl.LightningModule):
                  lr_decay_rate,
                  arch: Optional[str],
                  conv_4_out_planes: Optional[Union[List, int]],
+                 average_end: bool,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
+                 proto_loss: bool,
                  adapt: str,
                  mpnn_opts: dict,
                  mpnn_dev: str,
@@ -114,7 +117,6 @@ class NNProtoCLR(pl.LightningModule):
                  mode='trainval',
                  eval_ways=5,
                  sup_finetune="prototune",
-                 prototune_use_augs=False,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
@@ -127,8 +129,7 @@ class NNProtoCLR(pl.LightningModule):
         self.out_planes = conv_4_out_planes
         if arch == "conv4":
             backbone = create_model(
-                dict(in_planes=3, out_planes=self.out_planes, num_stages=4,
-                     average_end=False if conv_4_out_planes == 64 else True))
+                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=average_end))
         elif arch == "resnet12":
             backbone = resnet12()
         elif arch == "resnet12_wide":
@@ -155,12 +156,13 @@ class NNProtoCLR(pl.LightningModule):
         self.n_query = n_query
         self.temperature = temperature
 
+        self.proto_loss = proto_loss
+
         # PCLR Supfinetune
         self.adapt = adapt
         self.mode = mode
         self.eval_ways = eval_ways
         self.sup_finetune = sup_finetune
-        self.prototune_use_augs = prototune_use_augs
         self.sup_finetune_lr = sup_finetune_lr
         self.sup_finetune_epochs = sup_finetune_epochs
         self.ft_freeze_backbone = ft_freeze_backbone
@@ -251,6 +253,40 @@ class NNProtoCLR(pl.LightningModule):
             nearest_neighbour = self.queue[idx]
         return idx, nearest_neighbour
 
+    def nnclr_loss_func(self, nn: torch.Tensor, p: torch.Tensor, temperature: float = 0.1,
+                        y_query=None) -> torch.Tensor:
+        """Computes NNCLR's loss given batch of nearest-neighbors nn from view 1 and
+        predicted features p from view 2.
+
+        Args:
+            nn (torch.Tensor): NxD Tensor containing nearest neighbors' features from view 1.
+            p (torch.Tensor): NxD Tensor containing predicted features from view 2
+            temperature (float, optional): temperature of the softmax in the contrastive loss. Defaults
+                to 0.1.
+
+        Returns:
+            torch.Tensor: NNCLR loss.
+        """
+
+        nn = F.normalize(nn, dim=-1)
+        p = F.normalize(p, dim=-1)
+        # to be consistent with simclr, we now gather p
+        # this might result in suboptimal results given previous parameters.
+        if dist.is_initialized() and dist.is_available():
+            p = self.all_gather(p)
+
+        logits = nn @ p.T / temperature
+
+        rank = self.global_rank
+        n = nn.size(0)
+        if y_query is None:
+            labels = torch.arange(n * rank, n * (rank + 1), device=p.device)
+        else:
+            labels = y_query
+            logits = einops.rearrange(logits, "s q -> 1 s q")
+        loss = F.cross_entropy(logits, labels)
+        return loss
+
     @property
     def learnable_params(self):
 
@@ -266,21 +302,6 @@ class NNProtoCLR(pl.LightningModule):
             },
         ]
 
-    def mpnn_forward_pass(self, x_support, x_query, y_support, y_query, ways):
-        loss_cnn = 0.
-        z_orig, z = self.mpnn_forward(torch.cat([x_support, x_query]),
-                                      torch.cat([y_support, y_query], 1).squeeze())
-        if self.mpnn_opts["loss_cnn"]:
-            loss_cnn, _ = self.calculate_protoclr_loss(z_orig, y_support, y_query, ways,
-                                                       temperature=self.mpnn_temperature)
-            loss_cnn *= self.mpnn_opts["scaling_ce"]
-            self.log("loss_cnn", loss_cnn.item())
-        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
-                                                 ways, loss_fn=self.gnn_loss,
-                                                 temperature=self.mpnn_temperature)
-        loss = loss + loss_cnn
-        return loss, acc, z
-
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
         #
@@ -294,8 +315,8 @@ class NNProtoCLR(pl.LightningModule):
         else:
             z_proto = get_prototypes(z_support, y_support, ways)
 
-        loss, acc = prototypical_loss(z_proto, z_query, y_query, distance=self.distance, loss_fn=loss_fn,
-                                      temperature=temperature)
+        loss, acc, _ = prototypical_loss(z_proto, z_query, y_query, distance=self.distance, loss_fn=loss_fn,
+                                         temperature=temperature)
         return loss, acc
 
     @staticmethod
@@ -376,6 +397,7 @@ class NNProtoCLR(pl.LightningModule):
         return y, z, p
 
     def training_step(self, batch, batch_idx):
+        proto_loss = 0.
         x0 = batch['origs']
         x1 = batch['views']
         targets = batch['labels']
@@ -401,18 +423,29 @@ class NNProtoCLR(pl.LightningModule):
             z1 = F.normalize(z1, dim=-1)
 
         idx0, nn0 = self.find_nn(z0)
-        # add nearest neighbours of original views into x_query
-        z1 = torch.cat([z1, nn0])
-        y_query = torch.cat([y_query, y_support], dim=-1)
-        z0 = einops.rearrange(z0, 'b e -> 1 b e')
-        z1 = einops.rearrange(z1, 'b e -> 1 b e')
+        _, nn1 = self.find_nn(z1)
+        nnclr_loss = (
+                self.nnclr_loss_func(nn0, p1, temperature=self.temperature, y_query=y_query) / 2
+                + self.nnclr_loss_func(p0, nn1, temperature=self.temperature, y_query=y_query) / 2
+        )
+        self.dequeue_and_enqueue(z0, targets[:, 0])
 
-        loss, acc = prototypical_loss(z0, z1, y_query, distance=self.distance, temperature=self.temperature)
+        if self.proto_loss:
+            # add nearest neighbours of original views into x_query
+            z1 = torch.cat([z1, nn0])
+            y_query = torch.cat([y_query, y_support], dim=-1)
+            z0 = einops.rearrange(z0, 'b e -> 1 b e')
+            z1 = einops.rearrange(z1, 'b e -> 1 b e')
+            proto_loss, acc, _ = prototypical_loss(z0, z1, y_query, distance=self.distance,
+                                                   temperature=self.temperature)
+            self.log_dict({"train/proto_loss": proto_loss.item(), "train/proto_acc": acc},
+                          on_epoch=True,
+                          on_step=True,
+                          prog_bar=True)
         nn_acc = (targets[:, 0] == self.queue_y[idx0]).sum() / ways
         # dequeue and enqueue, only storing support samples right now
         z0 = z0.squeeze(0)
         z1 = z1.squeeze(0)
-        self.dequeue_and_enqueue(z0, targets[:, 0])
 
         z0_std = F.normalize(z0, dim=-1).std(dim=0).mean()
         z1_std = F.normalize(z1, dim=-1).std(dim=0).mean()
@@ -423,18 +456,17 @@ class NNProtoCLR(pl.LightningModule):
         class_loss = F.cross_entropy(scores, targets.long())
         class_acc = accuracy(scores, targets)
 
-        self.log_dict(dict(class_acc=class_acc, class_loss=class_loss, z_std=z_std, nn_acc=nn_acc), on_epoch=True,
+        self.log_dict({"train/class_acc": class_acc, "train/class_loss": class_loss, "train/z_std": z_std,
+                       "train/nn_acc": nn_acc}, on_epoch=True,
                       on_step=True)
-        self.log_dict(dict(train_loss=loss.item(), acc=acc),
-                      on_epoch=True,
-                      on_step=True,
-                      prog_bar=True)
-        return loss + class_loss
+        self.log("train/nnclr_loss", nnclr_loss.item())
+
+        return proto_loss + nnclr_loss + class_loss
 
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
                   freeze_backbone=False, finetune_batch_norm=False,
-                  inner_lr=0.001, total_epoch=15, n_way=5, use_augs=False):
+                  inner_lr=0.001, total_epoch=15, n_way=5):
         x_support = episode['train'][0][0]  # only take data & only first batch
         x_support = x_support.to(device)
         x_support_var = Variable(x_support)
@@ -573,8 +605,7 @@ class NNProtoCLR(pl.LightningModule):
                 freeze_backbone=self.ft_freeze_backbone,
                 finetune_batch_norm=self.finetune_batch_norm,
                 device=self.device,
-                n_way=self.eval_ways,
-                use_augs=self.prototune_use_augs)
+                n_way=self.eval_ways)
         elif self.sup_finetune == "std_proto":
             with torch.no_grad():
                 loss, acc = std_proto_form(self, batch, batch_idx)

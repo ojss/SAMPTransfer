@@ -1,8 +1,11 @@
 seed_everything: 72
 model:
-  arch: resnet12_wide
+  distance: cosine
+  arch: conv4
   conv_4_out_planes: 64
+  average_end: true
   classifier_lr: 0.2
+  proto_loss: true
   dataset: ${data.dataset}
   optim: adam
   lr_sch: cos
@@ -12,12 +15,12 @@ model:
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   use_projector: True
-  use_prediction_head: False
+  use_prediction_head: True
   projection_out_dim: 256
   projection_h_dim: 2048
   pred_h_dim: 4096
   eta_min: 5e-5
-  lr: 1e-1
+  lr: 0.0001563663718906821
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 1e-5
@@ -30,10 +33,9 @@ model:
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
-    _use: False
+    _use: True
     loss_cnn: False
     scaling_ce: 1
-    adapt: instance
     temperature: 0.2
     output_train_gnn: plain
     graph_params:
@@ -87,7 +89,7 @@ trainer:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         dirpath: "./ckpts/"
-        monitor: "val_accuracy_epoch"
+        monitor: "val/accuracy"
         save_top_k: 2
         save_last: True
         every_n_epochs: 1
@@ -103,7 +105,7 @@ data:
   n_query: 3
   batch_size: 64
   num_workers: 8
-  tfm_method: vicreg
+  tfm_method: amdim
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

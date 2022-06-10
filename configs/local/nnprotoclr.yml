@@ -1,8 +1,11 @@
 seed_everything: 72
 model:
-  arch: resnet12_wide
+  distance: cosine
+  arch: conv4
   conv_4_out_planes: 64
+  average_end: true
   classifier_lr: 0.2
+  proto_loss: true
   optim: adam
   lr_sch: cos
   warmup_start_lr: 1e-3
@@ -11,12 +14,12 @@ model:
   sup_finetune: prototune # [prototune, std_proto, proto_maml, sinkhorn]
   sup_finetune_epochs: 15
   use_projector: True
-  use_prediction_head: False
-  projection_out_dim: 256
+  use_prediction_head: True
+  projection_out_dim: 64
   projection_h_dim: 2048
   pred_h_dim: 4096
   eta_min: 5e-5
-  lr: 1e-3
+  lr: 0.0001563663718906821
   lr_decay_step: 25000
   lr_decay_rate: 0.5
 #  weight_decay: 6.059722614369727e-06
@@ -96,7 +99,7 @@ data:
   n_query: 3
   batch_size: 16
   num_workers: 0
-  tfm_method: vicreg
+  tfm_method: amdim
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True
