@@ -2,6 +2,8 @@ __all__ = ['euclidean_distance', 'cosine_similarity', 'get_num_samples', 'get_pr
            'Encoder', 'Decoder', 'CAE', 'Encoder4L', 'Decoder4L', 'Decoder4L4Mini', 'CAE4L']
 
 # adapted from the torchmeta code
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,9 +45,9 @@ def sns(p, q):
     :param p:
     :return:
     """
-    p = p.squeeze(0)
-    q = q.squeeze(0)
-    return F.normalize(p, p=2., dim=-1) @ q.T
+    p = F.normalize(p, dim=-1)
+    sim = torch.einsum('bik, bjk->bij', p, q)
+    return sim
 
 
 def cosine_similarity(x, y):
@@ -107,7 +109,8 @@ def get_prototypes(emb, targets, num_classes):
 
 
 def prototypical_loss(prototypes, embeddings, targets,
-                      distance='euclidean', loss_fn=F.cross_entropy, temperature=1., **kwargs):
+                      distance='euclidean', loss_fn=F.cross_entropy, temperature=1., **kwargs) -> Tuple[
+    torch.Tensor, float, torch.Tensor]:
     """Compute the loss (i.e. negative log-likelihood) for the prototypical
     network, on the test/query points.
 
@@ -143,19 +146,22 @@ def prototypical_loss(prototypes, embeddings, targets,
         loss = loss_fn(-squared_distances / temperature, targets, **kwargs)
         _, predictions = torch.min(squared_distances, dim=1)
         accuracy = torch.mean(predictions.eq(targets).float())
+        logits = -squared_distances
     elif distance == 'cosine':
         cosine_similarities = cosine_similarity(prototypes, embeddings)
         loss = loss_fn(cosine_similarities, targets, **kwargs)
         _, predictions = torch.max(cosine_similarities, dim=1)
         accuracy = torch.mean(predictions.eq(targets).float())
+        logits = cosine_similarities
     elif distance == "sns":
-        sns_similarities = sns(prototypes, embeddings).unsqueeze(0)
+        sns_similarities = sns(prototypes, embeddings)
         loss = loss_fn(sns_similarities, targets, **kwargs)
         _, predictions = torch.max(sns_similarities, dim=1)
         accuracy = torch.mean(predictions.eq(targets).float())
+        logits = sns_similarities
     else:
         raise ValueError('Distance must be "euclidean" or "cosine"')
-    return loss, accuracy.item()
+    return loss, accuracy.item(), logits
 
 
 class Encoder(nn.Module):
