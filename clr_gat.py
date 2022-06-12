@@ -765,7 +765,7 @@ class CLRGAT(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
-        self.log_dict({'val/loss': loss, 'val/accuracy': acc}, prog_bar=True, on_step=True, on_epoch=True)
+        self.log_dict({'val/loss': loss, 'val/accuracy': acc}, prog_bar=True)
         return loss, acc
 
     def test_step(self, batch, batch_idx):
