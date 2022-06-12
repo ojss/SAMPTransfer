@@ -239,7 +239,8 @@ class UnlabelledDataset(Dataset):
             image = Image.open(io.BytesIO(self.data[index])).convert('RGB')
         else:
             image = Image.fromarray(self.data[index])
-        target = self.targets[index]
+        if self.dataset == "miniimagenet":
+            target = self.targets[index]
 
         view_list = []
         originals = []
@@ -258,7 +259,7 @@ class UnlabelledDataset(Dataset):
                 view_list.append(self.original_transform(image).unsqueeze(0))
 
         return dict(origs=torch.cat(originals), views=torch.cat(view_list),
-                    labels=np.repeat(target, self.n_support + self.n_query))
+                    labels=np.repeat(target, self.n_support + self.n_query) if self.dataset == "miniimagenet" else 0)
 
 
 # Cell
