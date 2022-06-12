@@ -178,7 +178,7 @@ class CLRGAT(pl.LightningModule):
         elif arch in ["resnet12", "resnet12_wide"]:
             backbone = feature_extractors.feature_extractor.__dict__[arch]()
         if not self.scl:
-            _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+            _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
 
         self.weight_decay = weight_decay
         self.optim = optim
@@ -471,7 +471,7 @@ class CLRGAT(pl.LightningModule):
         elif self.mpnn_opts["adapt"] == "re_rep":
             combined = torch.cat([x_a_i, x_b_i])
             _, z = self.mpnn_forward(combined)
-            z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
+            z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, 0.1)
         else:
             z_a_i = self.model.backbone(x_a_i).flatten(1)
         input_dim = z_a_i.shape[1]
@@ -524,7 +524,7 @@ class CLRGAT(pl.LightningModule):
                 elif self.mpnn_opts["adapt"] == "re_rep":
                     combined = torch.cat([z_batch, x_b_i])
                     _, combined = self.mpnn_forward(combined)
-                    output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2, self.re_rep_temp)
+                    output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2, 0.1)
                 else:
                     output, _ = self.model(z_batch).flatten(1)
 
@@ -564,7 +564,7 @@ class CLRGAT(pl.LightningModule):
         elif self.mpnn_opts["adapt"] == "re_rep":
             combined = torch.cat([x_a_i, x_b_i])
             _, combined = self.mpnn_forward(combined)
-            _, output = self.re_represent(combined, len(x_a_i), self.alpha1, self.alpha2, self.re_rep_temp)
+            _, output = self.re_represent(combined, len(x_a_i), self.alpha1, self.alpha2, 0.1)
         else:
             output = self.forward(x_b_i)
         scores = classifier(output)
@@ -602,6 +602,9 @@ class CLRGAT(pl.LightningModule):
             z = einops.rearrange(z, "1 b e -> b e")
             z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support.squeeze(0))
             z = einops.rearrange(z, "b e -> 1 b e")
+        elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "re_rep":
+            _, z = self.mpnn_forward(x)
+            z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, 0.1))
 
         z_support = z[:, :self.eval_ways * shots]
         z_query = z[:, self.eval_ways * shots:]
