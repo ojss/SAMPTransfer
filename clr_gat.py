@@ -34,7 +34,7 @@ from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from graph.latentgnn import LatentGNNV1
 from optimal_transport.sot import SOT
-from proto_utils import (get_prototypes, prototypical_loss)
+from proto_utils import (get_prototypes, prototypical_loss, euclidean_distance)
 from utils.label_cleansing import label_finetuning
 from utils.optimal_transport import OptimalTransport
 from utils.rerepresentation import re_represent
@@ -135,6 +135,9 @@ class CLRGAT(pl.LightningModule):
                  distance='euclidean',
                  eval_ways=5,
                  sup_finetune="prototune",
+                 in_planes: int = 3,
+                 alpha1: float = 0.4,
+                 alpha2: float = 0.5,
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
@@ -155,7 +158,7 @@ class CLRGAT(pl.LightningModule):
             backbone = feature_extractor
         elif arch == "conv4":
             backbone = create_model(
-                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=average_end))
+                dict(in_planes=in_planes, out_planes=self.out_planes, num_stages=4, average_end=average_end))
         elif "scl" in arch and self.scl:
             model_name = arch.replace("scl_", "")
             in_dim = hidden_size = 64
@@ -201,6 +204,9 @@ class CLRGAT(pl.LightningModule):
         self.ft_freeze_backbone = ft_freeze_backbone
         self.finetune_batch_norm = finetune_batch_norm
         self.img_orig_size = img_orig_size
+
+        self.alpha1 = alpha1
+        self.alpha2 = alpha2
 
         self.label_cleansing_opts = label_cleansing_opts
 
@@ -387,6 +393,28 @@ class CLRGAT(pl.LightningModule):
 
         return {"loss": loss, "accuracy": acc}
 
+    @staticmethod
+    def re_represent(z: torch.Tensor, n_support: int,
+                     alpha1: float, alpha2: float, t: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        # being implemented with training shapes in mind
+        # TODO: check if the same code works for testing shapes or requires some squeezing
+        z_support = z[: n_support, :]
+        z_query = z[n_support:, :]
+        D = euclidean_distance(z_query.unsqueeze(0), z_query.unsqueeze(0)).squeeze(0)
+        # D = torch.cdist(z_query, z_query).pow(2)
+        A = F.softmax(t * D, dim=-1)
+        scaled_query = (A.unsqueeze(-1) * z_query).sum(1)  # weighted sum of all query features
+        z_query = (1 - alpha1) * z_query + alpha1 * scaled_query
+
+        # Use re-represented query set to propagate information to the support set
+        z_query = z_query.squeeze(0)
+        D = euclidean_distance(z_support.unsqueeze(0), z_query.unsqueeze(0)).squeeze(0)
+        # D = torch.cdist(z_support, z_query).pow(2)
+        A = F.softmax(t * D, dim=-1)
+        scaled_query = (A.unsqueeze(-1) * z_query).sum(1)
+        z_support = (1 - alpha2) * z_support + alpha2 * scaled_query
+        return z_support, z_query
+
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
                   freeze_backbone=False, finetune_batch_norm=False,
@@ -440,6 +468,10 @@ class CLRGAT(pl.LightningModule):
             z_a_i = self.forward(x_a_i)
             z_query = self.forward(x_b_i)
             z_a_i, _ = transportation_module(z_a_i, z_query)
+        elif self.mpnn_opts["adapt"] == "re_rep":
+            combined = torch.cat([x_a_i, x_b_i])
+            _, z = self.mpnn_forward(combined)
+            z_a_i, z_b_i = self.re_represent(z, support_size, self.alpha1, self.alpha2, self.re_rep_temp)
         else:
             z_a_i = self.model.backbone(x_a_i).flatten(1)
         input_dim = z_a_i.shape[1]
@@ -489,6 +521,10 @@ class CLRGAT(pl.LightningModule):
                     combined = torch.cat([z_batch, x_b_i])
                     combined = self.forward(combined)
                     output, _ = combined.split([len(z_batch), len(x_b_i)])
+                elif self.mpnn_opts["adapt"] == "re_rep":
+                    combined = torch.cat([z_batch, x_b_i])
+                    _, combined = self.mpnn_forward(combined)
+                    output, _ = self.re_represent(combined, len(z_batch), self.alpha1, self.alpha2, self.re_rep_temp)
                 else:
                     output, _ = self.model(z_batch).flatten(1)
 
@@ -525,6 +561,10 @@ class CLRGAT(pl.LightningModule):
             z_a_i = self.forward(x_a_i)
             z_query = self.forward(x_b_i)
             z_a_i, output = transportation_module(z_a_i, z_query)
+        elif self.mpnn_opts["adapt"] == "re_rep":
+            combined = torch.cat([x_a_i, x_b_i])
+            _, combined = self.mpnn_forward(combined)
+            _, output = self.re_represent(combined, len(x_a_i), self.alpha1, self.alpha2, self.re_rep_temp)
         else:
             output = self.forward(x_b_i)
         scores = classifier(output)
