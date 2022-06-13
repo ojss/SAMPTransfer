@@ -70,7 +70,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         "warmup_epochs": 250,
         "sup_finetune_lr": tune.loguniform(1e-6, 1e-3),
         "sup_finetune": "prototune",  # [prototune, std_proto, label_cleansing, sinkhorn]
-        "sup_finetune_epochs": tune.uniform(15, 25),
+        "sup_finetune_epochs": tune.randint(15, 25),
         "eta_min": 5e-5,
         "lr": tune.loguniform(1e-6, 1e-3),
         "lr_decay_step": 25000,
@@ -188,4 +188,4 @@ if __name__ == "__main__":
     with msg.loading("Init Ray"):
         ray.init(address=os.environ["ip_head"])
     tune_gat_clr_pbt(100, num_epochs=15, gpus_per_trial=1,
-                     data_dir="/home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/")
+                     data_dir="/home/nfs/oshirekar/unsupervised_ml/data/")
