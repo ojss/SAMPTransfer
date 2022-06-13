@@ -115,9 +115,9 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
                 "cat": 0,
                 "every": 0,
                 "gnn": {
-                    "num_layers": tune.uniform(1, 4),
+                    "num_layers": tune.randint(1, 4),
                     "aggregator": tune.choice(["add", "max", "mean"]),
-                    "num_heads": tune.uniform(1, 8),
+                    "num_heads": tune.randint(1, 8),
                     "attention": "dot",
                     "mlp": 1,
                     "dropout_mlp": 0.1,
