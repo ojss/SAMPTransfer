@@ -1,7 +1,6 @@
 import math
 import os
 import sys
-from wasabi import msg
 
 import pytorch_lightning as pl
 import ray
@@ -10,8 +9,10 @@ from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.integration.pytorch_lightning import TuneReportCheckpointCallback
 from ray.tune.schedulers import PopulationBasedTraining
+from wasabi import msg
 
 from clr_gat import CLRGAT
+from dataloaders import UnlabelledDataModule
 
 
 def train_gat_clr_tune_checkpoint(config,
@@ -39,10 +40,19 @@ def train_gat_clr_tune_checkpoint(config,
     if checkpoint_dir:
         kwargs["resume_from_checkpoint"] = os.path.join(checkpoint_dir, "checkpoint")
 
+    datamodule = UnlabelledDataModule(dataset='miniimagenet',
+                                      datapath=data_dir,
+                                      split='test',
+                                      img_size_orig=(84, 84),
+                                      img_size_crop=(84, 84),
+                                      eval_ways=5,
+                                      eval_support_shots=5,
+                                      eval_query_shots=15)
+
     model = CLRGAT(**config)
     trainer = pl.Trainer(**kwargs)
 
-    trainer.fit(model)
+    trainer.fit(model, datamodule=datamodule)
 
 
 def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/data"):
@@ -168,8 +178,8 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         local_dir="./ray_results/"
     )
 
-    msg.info(f"Best hyperparameters found were: {analysis.best_config}")
-    # print("Best hyperparameters found were: ", analysis.best_config)
+    # msg.info(f"Best hyperparameters found were: {analysis.best_config}")
+    print("Best hyperparameters found were: ", analysis.best_config)
 
 
 if __name__ == "__main__":
