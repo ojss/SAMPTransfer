@@ -598,13 +598,25 @@ class CLRGAT(pl.LightningModule):
         z = einops.rearrange(z, "b e -> 1 b e")
 
         if sot:
+            # msg.info(f"Running SOT, {shots}, {test_shots}")
             sot = SOT(distance_metric=self.distance)
             z = einops.rearrange(z, "1 b e -> b e")
             z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support.squeeze(0))
             z = einops.rearrange(z, "b e -> 1 b e")
+        elif self.mpnn_opts["adapt"] == "ot":
+            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                     stopping_criterion=1e-4, device=self.device)
+            z_a_i = self.forward(x_support.squeeze(0))
+            z_query = self.forward(x_query.squeeze(0))
+            z = torch.cat(transportation_module(z_a_i, z_query)).unsqueeze(0)
+            # sot = SOT(distance_metric=self.distance)
+            # z = einops.rearrange(z, "1 b e -> b e")
+            # z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support.squeeze(0))
+            # z = einops.rearrange(z, "b e -> 1 b e")
         elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "re_rep":
             _, z = self.mpnn_forward(x)
             z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, 0.1))
+            z = einops.rearrange(z, "b e -> 1 b e")
 
         z_support = z[:, :self.eval_ways * shots]
         z_query = z[:, self.eval_ways * shots:]
