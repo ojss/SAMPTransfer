@@ -1,35 +1,66 @@
-import argparse
+from typing import Optional
+from wasabi import msg
 
 import pytorch_lightning as pl
+import torch.cuda
+import typer
+from omegaconf import OmegaConf
 
-from feature_extractors.feature_extractor import CNN_4Layer
 from callbacks import ConfidenceIntervalCallback
+from clr_gat import CLRGAT
 from dataloaders import UnlabelledDataModule
-from protoclr_obow import PCLROBoW
+
+app = typer.Typer()
+
+# pl.seed_everything(72)
 
 
-def cli_main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--c", type=str)
-    parser.add_argument("--ev_ways", default=5, type=int)
-    parser.add_argument("--ev_supp_shots", default=5, type=int)
-    parser.add_argument("--ev_query_shots", default=15, type=int)
-    parser.add_argument("--sup_finetune", action='store_true')
-    args = parser.parse_args()
-    kwargs = dict(n_support=1, n_query=3, batch_size=64, lr_decay_step=25000, lr_decay_rate=0.5,
-                  sup_finetune=args.sup_finetune,
-                  feature_extractor=CNN_4Layer(3, 64, 64), bow_levels=['block4'],
-                  bow_extractor_opts={'inv_delta': 15, 'num_words': 8192}, bow_predictor_opts={'kappa': 5})
-    model = PCLROBoW(**kwargs)
-    # xs = torch.load("ckpts/model_net_checkpoint_335.pth.tar", map_location='cpu')
-    # model.load_state_dict(xs['network'])
-    model.load_from_checkpoint(args.c, **kwargs)
-    datamodule = UnlabelledDataModule(dataset='miniimagenet',
-                                      datapath='/home/nfs/oshirekar/unsupervised_ml/data/',
-                                      split='test',
-                                      img_size_orig=(84, 84),
-                                      img_size_crop=(60, 60), eval_ways=args.ev_ways,
-                                      eval_support_shots=args.ev_supp_shots, eval_query_shots=args.ev_query_shots)
+@app.command()
+def clrgat(dataset: str, ckpt_path: str, datapath: str, eval_ways: int, eval_shots: int, query_shots: int,
+           sup_finetune: str, config: Optional[str] = None, adapt: str = "ot"):
+    if torch.cuda.is_available():
+        map_location = "cuda"
+    else:
+        map_location = "cpu"
+    msg.divider("Eval Setting")
+    msg.info(f"Eval Ways: {eval_ways}")
+    msg.info(f"Eval Shots: {eval_shots}")
+    if config is not None:
+        cfg = OmegaConf.load(config)
+    msg.divider("Model Setup")
+    with msg.loading("Loading model"):
+        # uncomment for older checkpoints
+        model = CLRGAT.load_from_checkpoint(checkpoint_path=ckpt_path,
+                                            mpnn_dev=map_location,
+                                            arch="conv4",
+                                            out_planes=64,
+                                            average_end=False,
+                                            label_cleansing_opts={
+                                                "use": False,
+                                            },
+                                            use_hms=False,
+                                            use_projector=False,
+                                            projector_h_dim=2048,
+                                            projector_out_dim=256,
+                                            eval_ways=eval_ways,
+                                            sup_finetune=sup_finetune,
+                                            sup_finetune_epochs=25,
+                                            # map_location=map_location,
+                                            hparams_file=config)
+        model.mpnn_opts["adapt"] = adapt
+
+    msg.divider("Adaptation Type")
+    msg.info(f" Adaptation type in use: {model.mpnn_opts['adapt']}")
+    with msg.loading("Loading datamodule"):
+        datamodule = UnlabelledDataModule(dataset=dataset,
+                                          datapath=datapath,
+                                          split='test',
+                                          img_size_orig=(84, 84) if dataset == 'miniimagenet' else (28, 28),
+                                          img_size_crop=(60, 60),
+                                          eval_ways=eval_ways,
+                                          eval_support_shots=eval_shots,
+                                          eval_query_shots=query_shots)
+    msg.divider("Beginning testing")
     trainer = pl.Trainer(
         gpus=-1,
         limit_test_batches=600,
@@ -39,4 +70,4 @@ def cli_main():
 
 
 if __name__ == '__main__':
-    cli_main()
+    app()
