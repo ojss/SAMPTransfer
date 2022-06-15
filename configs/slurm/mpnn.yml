@@ -19,6 +19,7 @@ model:
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
+  dataset: ${data.dataset}
   img_orig_size: ${data.img_size_orig}
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
