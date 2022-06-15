@@ -146,3 +146,7 @@ expts/
 *.hdf5
 *.ckpt
 scratch.*
+/SOT
+/solo-learn
+/slurm-launch.py
+/slurm-template.sh
