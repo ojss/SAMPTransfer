@@ -1,4 +1,52 @@
 from .utils import *
+from torch.nn import Parameter, Linear
+from torch import nn
+class GATv2Attention(nn.Module):
+    def __init__(self, embed_dim, nhead, aggr,leaky_relu_negative_slope: float = 0.2,
+     dropout=.1, mult_attr=0, bias=True, concat=True, share_weights=False) -> None:
+        super().__init__()
+        print("GATv2Attention")
+        self.embed_dim = embed_dim
+        self.nhead = nhead
+        self.aggr = aggr
+        self.mult_attr = mult_attr
+
+        if concat:
+            assert embed_dim % nhead == 0
+            self.n_hidden = embed_dim // nhead
+        
+        self.linear_l = nn.Linear(embed_dim, self.n_hidden * nhead, bias=False)
+        if share_weights:
+            self.linear_r = self.linear_l
+        else:
+            self.linear_r = nn.Linear(embed_dim, self.n_hidden * nhead, bias=False)
+        
+        self.attn = nn.Linear(self.n_hidden, 1, bias=False)
+        self.activation = nn.LeakyReLU(negative_slope=leaky_relu_negative_slope)
+        self.softmax = nn.Softmax(dim=1)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, h: torch.Tensor, edge_index: torch.Tensor):
+        n_nodes = h.shape[0]
+        g_l = self.linear_l(h).view(n_nodes, self.nhead, self.n_hidden)
+        g_r = self.linear_r(h).view(n_nodes, self.nhead, self.n_hidden)
+
+        g_l_repeat = g_l.repeat(n_nodes, 1, 1)
+        g_r_interleave = g_r.repeat_interleave(n_nodes, dim=0)
+        
+        g_sum = g_l_repeat + g_r_interleave
+        g_sum = g_sum.view(n_nodes, n_nodes, self.n_heads, self.n_hidden)
+
+        e = self.attn(self.activation(g_sum))
+        e = e.squeeze(-1)
+        r, c, e_shape = edge_index[:, 0], edge_index[:, 1], edge_index.shape[0]
+
+        # e has to be masked to -ve infinity if there is no connection
+        # but if there is a fully connected graph is this needed?
+        e = e.masked_fill()
+
+
+
 
 
 class MultiHeadDotProduct(nn.Module):
