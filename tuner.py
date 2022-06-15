@@ -14,7 +14,6 @@ from wasabi import msg
 from clr_gat import CLRGAT
 from dataloaders import UnlabelledDataModule
 
-
 def train_gat_clr_tune_checkpoint(config,
                                   checkpoint_dir=None,
                                   num_epochs=50,
@@ -22,6 +21,8 @@ def train_gat_clr_tune_checkpoint(config,
                                   data_dir="~/data"):
     kwargs = {
         "max_epochs": num_epochs,
+        "limit_train_batches": 100,
+        "limit_val_batches": 15,
         # If fractional GPUs passed in, convert to int.
         "gpus": math.ceil(num_gpus),
         "logger": TensorBoardLogger(save_dir=tune.get_trial_dir(), name="", version="."),
@@ -42,7 +43,13 @@ def train_gat_clr_tune_checkpoint(config,
 
     datamodule = UnlabelledDataModule(dataset='miniimagenet',
                                       datapath=data_dir,
-                                      split='test',
+                                      batch_size=64,
+                                      num_workers=4,
+                                      n_support=1,
+                                      n_query=3,
+                                      tfm_method="amdim",
+                                      no_aug_support=True,
+                                      split='train',
                                       img_size_orig=(84, 84),
                                       img_size_crop=(84, 84),
                                       eval_ways=5,
@@ -50,7 +57,7 @@ def train_gat_clr_tune_checkpoint(config,
                                       eval_query_shots=15)
 
     model = CLRGAT(**config)
-    trainer = pl.Trainer(**kwargs)
+    trainer = pl.Trainer(**kwargs, check_val_every_n_epoch=5)
 
     trainer.fit(model, datamodule=datamodule)
 
@@ -58,8 +65,8 @@ def train_gat_clr_tune_checkpoint(config,
 def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/data"):
     config = {
         "arch": "conv4",
-        "out_planes": tune.choice([64, [96, 128, 256, 512]]),
-        "average_end": tune.choice([True, False]),
+        "out_planes": 64,
+        "average_end": False,
         "scl": False,
         "distance": tune.choice(["euclidean", "cosine"]),
         "att_feat_dim": 80,
@@ -70,7 +77,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         "warmup_epochs": 250,
         "sup_finetune_lr": tune.loguniform(1e-6, 1e-3),
         "sup_finetune": "prototune",  # [prototune, std_proto, label_cleansing, sinkhorn]
-        "sup_finetune_epochs": tune.randint(15, 25),
+        "sup_finetune_epochs": tune.randint(15, 20),
         "eta_min": 5e-5,
         "lr": tune.loguniform(1e-6, 1e-3),
         "lr_decay_step": 25000,
@@ -127,7 +134,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
                 "gnn": {
                     "num_layers": tune.randint(1, 4),
                     "aggregator": tune.choice(["add", "max", "mean"]),
-                    "num_heads": tune.randint(1, 8),
+                    "num_heads": tune.choice([1, 2, 4, 8]),
                     "attention": "dot",
                     "mlp": 1,
                     "dropout_mlp": 0.1,
@@ -154,7 +161,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         })
 
     reporter = CLIReporter(
-        parameter_columns=["lr", "optim", "lr_sch", "out_planes"],
+        parameter_columns=["lr", "optim", "lr_sch", "out_planes", ],
         metric_columns=["val/loss", "val/accuracy", "training_iteration"]
     )
 
@@ -187,5 +194,5 @@ if __name__ == "__main__":
     num_cpus = int(sys.argv[2])
     with msg.loading("Init Ray"):
         ray.init(address=os.environ["ip_head"])
-    tune_gat_clr_pbt(100, num_epochs=15, gpus_per_trial=1,
+    tune_gat_clr_pbt(100, num_epochs=50, gpus_per_trial=1,
                      data_dir="/home/nfs/oshirekar/unsupervised_ml/data/")
