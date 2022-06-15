@@ -45,7 +45,7 @@ model:
     sinkhorn_iter: 1
     use_pt: True # [True, False]
   mpnn_loss_fn: ce
-  mpnn_dev: cuda
+  mpnn_dev: cpu
   mpnn_opts:
     _use: True
     loss_cnn: False
@@ -83,7 +83,7 @@ model:
         use_batchnorm: 0
   feature_extractor: null
 trainer:
-  gpus: -1
+  gpus: 0
   #  gradient_clip_val: 0.5
   num_sanity_val_steps: 1
   fast_dev_run: 1
@@ -113,10 +113,10 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-  #  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-  #  full_size_path: ../data/processed_images
+  datapath: ../data/
+  # datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
+  # full_size_path: /home/ojass/projects/data/processed_images/
+  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
   batch_size: 8
