@@ -2,11 +2,11 @@ __all__ = ['MAMLCLR', 'GNN']
 
 import copy
 import uuid
-from types import SimpleNamespace
 from typing import Optional, Iterable, Union, Tuple
 
 import einops
 import kornia as K
+import learn2learn as l2l
 import numpy as np
 import pl_bolts.optimizers
 import pytorch_lightning as pl
@@ -23,37 +23,31 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
-from SCL.losses import ContrastiveLoss
-from SCL.models.attention import AttentionSimilarity
-from SCL.models.contrast import ContrastResNet
 from dataloaders import UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from graph.latentgnn import LatentGNNV1
+from optimal_transport.sot import SOT
 from proto_utils import (get_prototypes,
                          prototypical_loss)
 from utils.label_cleansing import label_finetuning
 from utils.optimal_transport import OptimalTransport
 from utils.rerepresentation import re_represent
 from utils.sk_finetuning import sinkhorned_finetuning
-from utils.sup_finetuning import Classifier, BaselineFinetune
-######################
-# TODO: make sure only one z is returned for the models' forward in the finetuning method
+from utils.sup_finetuning import Classifier
 from utils.task_generator import TaskGen
-import learn2learn as l2l
 
 
 class GNN(nn.Module):
     def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat",
-                 final_relu: bool = False, scl: bool = False):
+                 final_relu: bool = False):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
         self.mpnn_opts = mpnn_opts
         self.gnn_type = gnn_type
-        self.scl = scl
         mpnn_dev = mpnn_dev
         if gnn_type == "gat_v2":
             self.gnn = GAT(in_channels=emb_dim, hidden_channels=emb_dim // 4, out_channels=emb_dim,
@@ -73,16 +67,7 @@ class GNN(nn.Module):
         else:
             self.relu_final = nn.Identity()
 
-    def scl_forward(self, x):
-        _, spatial_f, global_f, avg_pool_feat = self.backbone(x)
-        # todo: check if GNN out on avg_pool_feat vs projector out is better
-        edge_attr, edge_index, gnn_out = self.graph_generator.get_graph(avg_pool_feat)
-        _, (gnn_out,) = self.gnn(gnn_out, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-        return spatial_f, global_f, avg_pool_feat, gnn_out
-
     def forward(self, x):
-        if self.scl:
-            return self.scl_forward(x)
         if "gat" in self.gnn_type:
             z = self.backbone(x)
             z_cnn = z.clone()
@@ -106,9 +91,10 @@ class MAMLCLR(pl.LightningModule):
     def __init__(self,
                  arch: str,
                  out_planes: Union[Iterable, int],
-                 n_support,
-                 n_query,
-                 batch_size,
+                 n_support: int,
+                 n_query: int,
+                 batch_size: int,
+                 task_size: int,
                  lr_decay_step,
                  lr_decay_rate,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
@@ -119,13 +105,12 @@ class MAMLCLR(pl.LightningModule):
                  use_projector: bool,
                  projector_h_dim: int,
                  projector_out_dim: int,
-                 scl: bool = False,
-                 att_feat_dim: int = 80,
                  gnn_type: str = "gat",
                  optim: str = 'adam',
                  dataset='omniglot',
                  weight_decay=0.01,
                  lr=1e-3,
+                 inner_lr=1e-3,
                  lr_sch='cos',
                  warmup_epochs=10,
                  warmup_start_lr=1e-3,
@@ -149,39 +134,22 @@ class MAMLCLR(pl.LightningModule):
         self.n_support = n_support
         self.n_query = n_query
         self.distance = distance
-        self.scl = scl
         self.out_planes = out_planes
 
         if feature_extractor is not None:
             backbone = feature_extractor
         elif arch == "conv4":
             backbone = create_model(dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=True))
-        elif "scl" in arch and self.scl:
-            model_name = arch.replace("scl_", "")
-            in_dim = hidden_size = 64
-            if model_name == "resnet12":
-                in_dim = hidden_size = 640
-            # TODO: careful about the feat_dim here. its for the projector
-            tmp = {"model": model_name, "dataset": "miniImageNet", "feat_dim": 80, "global_cont_loss": True,
-                   "spatial_cont_loss": True}
-            opt = SimpleNamespace(**tmp)
-            backbone = ContrastResNet(opt, 0)
-            self.spatial_attention = AttentionSimilarity(hidden_size=hidden_size, inner_size=att_feat_dim,
-                                                         aggregation="mean")
-            self.scl_criterion = ContrastiveLoss(temperature=10)
-            # todo: the below works, but needs a projector layer at the end - make sure to add it
-            # backbone = create_model(dict(in_planes=3, out_planes=self.out_planes,
-            #                              use_pool=[True, True, True, False],
-            #                              num_stages=4, average_end=True))
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
-        if not self.scl:
-            _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
+
+        _, in_dim = backbone(torch.randn(self.batch_size, 3, *img_orig_size)).flatten(1).shape
 
         self.weight_decay = weight_decay
         self.optim = optim
         self.lr = lr
+        self.inner_lr = inner_lr
         self.lr_sch = lr_sch
         self.warmup_epochs = warmup_epochs
         self.warmup_start_lr = warmup_start_lr
@@ -208,11 +176,12 @@ class MAMLCLR(pl.LightningModule):
         self.label_cleansing_opts = label_cleansing_opts
 
         self.mpnn_opts = mpnn_opts
+        self.task_size = task_size
 
         self.dim = in_dim
         if mpnn_opts["_use"]:
             self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type,
-                             final_relu=self.label_cleansing_opts["use"], scl=self.scl)
+                             final_relu=self.label_cleansing_opts["use"])
             self.mpnn_temperature = mpnn_opts["temperature"]
             if isinstance(mpnn_loss_fn, nn.Module):
                 self.gnn_loss = mpnn_loss_fn
@@ -224,13 +193,14 @@ class MAMLCLR(pl.LightningModule):
         if self.use_projector:
             self.projection_head = nn.Identity()
 
-        self.task_generator = TaskGen(task_size=4, query_size=2, batch_size=batch_size, device=mpnn_dev)
-        self.model = l2l.algorithms.MAML(self.model, lr=self.lr, first_order=True, allow_nograd=True)
+        self.task_generator = TaskGen(task_size=self.task_size, inner_aug_count=4, outer_aug_count=7,
+                                      batch_size=batch_size,
+                                      device=mpnn_dev)
+        self.model = l2l.algorithms.MAML(self.model, lr=self.inner_lr, first_order=True, allow_nograd=True)
 
-        self.automatic_optimization = True
+        self.automatic_optimization = False
 
     def configure_optimizers(self):
-        # TODO: make this bit configurable
         parameters = filter(lambda p: p.requires_grad, self.parameters())
         ret = {}
         if self.optim == 'sgd':
@@ -265,10 +235,6 @@ class MAMLCLR(pl.LightningModule):
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
-    def scl_mpnn_forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        spatial_f, global_f, avg_pool_feat, gnn_out = self.model(x)
-        return spatial_f, global_f, avg_pool_feat, gnn_out
-
     def mpnn_forward(self, x, y=None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -282,10 +248,7 @@ class MAMLCLR(pl.LightningModule):
 
     def forward(self, x):
         if self.mpnn_opts["_use"]:
-            if self.scl:
-                _, _, _, z = self.model(x)
-            else:
-                _, z = self.model(x)
+            _, z = self.model(x)
         else:
             z = self.model(x).flatten(1)
         return z
@@ -310,30 +273,6 @@ class MAMLCLR(pl.LightningModule):
         loss = sum(losses)
         return loss, acc, z
 
-    def scl_forward_pass(self, x_support, x_query, y_support, y_query, ways):
-        losses = []
-        spatial_f, global_f, avg_pool_feat, gnn_out = self.scl_mpnn_forward(torch.cat([x_support, x_query]))
-        # todo: see if this needs a projector head here in conjunction with ConvBlock impl
-        if self.mpnn_opts["loss_cnn"]:
-            loss, _ = self.calculate_protoclr_loss(global_f, y_support, y_query, ways,
-                                                   temperature=self.mpnn_temperature)
-            loss *= self.mpnn_opts["scaling_ce"]
-            losses.append(loss)
-            self.log("loss_cnn", loss.item())
-        if self.scl:
-            y = torch.cat([y_support, y_query], dim=-1)
-            y = einops.rearrange(y, "1 l -> l")
-            loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)
-            losses.append(loss)
-            self.log("loss_spatial", loss.item())
-
-        loss, acc = self.calculate_protoclr_loss(gnn_out, y_support, y_query,
-                                                 ways, loss_fn=self.gnn_loss,
-                                                 temperature=self.mpnn_temperature)
-        losses.append(loss)
-        loss = sum(losses)
-        return loss, acc, gnn_out
-
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
         #
@@ -351,78 +290,87 @@ class MAMLCLR(pl.LightningModule):
                                          distance=self.distance, loss_fn=loss_fn, temperature=temperature)
         return loss, acc
 
-    def fast_adapt(self, data, labels, learner, loss, adaptation_steps, shots, ways):
-        # Separate data into adaptation/evalutation sets
-        adaptation_indices = np.zeros(data.size(0), dtype=bool)
-        adaptation_indices[np.arange(shots * ways) * 2] = True
-        evaluation_indices = torch.from_numpy(~adaptation_indices)
-        adaptation_indices = torch.from_numpy(adaptation_indices)
-        adaptation_data, adaptation_labels = data[adaptation_indices], labels[adaptation_indices]
-        evaluation_data, evaluation_labels = data[evaluation_indices], labels[evaluation_indices]
-
-        # Adapt the model
-        for step in range(adaptation_steps):
-            adaptation_error = loss(learner(adaptation_data), adaptation_labels)
+    def fast_adapt(self, x_support: torch.Tensor, x_query: torch.Tensor, y_support: torch.Tensor, y_query: torch.Tensor,
+                   learner: l2l.algorithms.MAML, adaptation_steps):
+        x = torch.cat([x_support, x_query], dim=0)
+        for _ in range(adaptation_steps):
+            _, z = learner(x)
+            adaptation_error, _ = self.calculate_protoclr_loss(z, y_support, y_query, self.batch_size)
             learner.adapt(adaptation_error)
-
-        # Evaluate the adapted model
-        predictions = learner(evaluation_data)
-        evaluation_error = loss(predictions, evaluation_labels)
-        evaluation_accuracy = accuracy(predictions, evaluation_labels)
-        return evaluation_error, evaluation_accuracy
+        query_set = self.task_generator.queries()
+        query_set = einops.rearrange(query_set, "b a c h w -> (b a) c h w")
+        _, z = learner(query_set)
+        y_query_q = torch.arange(self.batch_size).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+        y_query_q = y_query_q.repeat(1, 1, self.n_query - 3)
+        y_query_q = y_query_q.view(1, -1).to(self.device)
+        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query_q, self.batch_size)
+        return loss, acc
 
     def on_train_batch_start(self, batch: dict, batch_idx: int, unused: int = 0) -> Optional[int]:
         self.task_generator.set_batch(batch)
 
     def training_step(self, batch, batch_idx):
         # [batch_size x ways x shots x image_dim]
-        # data = batch['data'].to(self.device)
-        acc = 0.
-        for i in range(5):
-            breakpoint()
-            t = self.task_generator.sample()
+        outer_optim = self.optimizers()
+        outer_optim.zero_grad()
+        self.model.zero_grad()
+        for _ in range(self.task_size):
+            t, other = self.task_generator.sample()
             local_learner = self.model.clone()
 
-            data, views = t.split([self.n_support, self.n_query], dim=1)
+            data, views = t.split([1, 3], dim=1)  # TODO: add arguments for this
             data = data.unsqueeze(0)
             # e.g. 50 images, 2 support, 2 query, miniImageNet: torch.Size([1, 50, 4, 3, 84, 84])
             batch_size = data.size(0)
             ways = data.size(1)
-
             # Divide into support and query shots
-            # x_support = data[:, :, :self.n_support]
-            # e.g. [1,50*n_support,*(3,84,84)]
-            x_support = data.reshape(
-                (batch_size, ways * self.n_support, *data.shape[-3:])).squeeze(0)
-            x_query = views.reshape(
-                (ways * self.n_query, *views.shape[-3:])
-            )
-            # x_query = data[:, :, self.n_support:].squeeze(0)
-            # e.g. [1,50*n_query,*(3,84,84)]
-            # x_query = x_query.reshape(
-            #     (batch_size, ways * self.n_query, *x_query.shape[-3:]))
+            # e.g. [1,50*n_support,*(3,84,84)] -> [50, 3, 84, 84]
+            x_support = einops.rearrange(data, "1 b 1 c h w -> b c h w")
+            # [50, 3, 3, 84, 84] -> [150, 3, 84, 84]
+            x_query = einops.rearrange(views, "b q c h w -> (b q) c h w")
 
             # Create dummy query labels
-            y_query = torch.arange(ways).unsqueeze(
-                0).unsqueeze(2)  # batch and shot dim
-            y_query = y_query.repeat(batch_size, 1, self.n_query)
+            y_query = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+            y_query = y_query.repeat(batch_size, 1, 3)
             y_query = y_query.view(batch_size, -1).to(self.device)
 
-            y_support = torch.arange(ways).unsqueeze(
-                0).unsqueeze(2)  # batch and shot dim
-            y_support = y_support.repeat(batch_size, 1, self.n_support)
+            y_support = torch.arange(ways).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+            y_support = y_support.repeat(batch_size, 1, 1)
             y_support = y_support.view(batch_size, -1).to(self.device)
 
-            # Extract features (first dim is batch dim)
-            # e.g. [1,50*(n_support+n_query),*(3,84,84)]
-            # x = torch.cat([x_support, x_query], 1)
-            if self.scl:
-                loss, acc, z = self.scl_forward_pass(x_support, x_query, y_support, y_query, ways)
-            else:
-                loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
-            self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
+            # othering the remaining set
+            x_support_other, x_query_other = other.split([1, 3], dim=1)
+            x_support_other = einops.rearrange(x_support_other, "b a c h w -> (b a) c h w")
+            x_query_other = einops.rearrange(x_query_other, "b a c h w -> (b a) c h w")
 
-        return {"loss": loss, "accuracy": acc}  # accuracy return as 0 by default if CLR loss not used
+            x_support = torch.cat([x_support, x_support_other])
+            x_query = torch.cat([x_query, x_query_other])
+
+            y_support_other = torch.tensor(ways + 1, dtype=torch.long, device=self.device).repeat(
+                x_support_other.size(0)).unsqueeze(0)
+            y_query_other = torch.tensor(ways + 1, dtype=torch.long, device=self.device).repeat(
+                x_query_other.size(0)).unsqueeze(0)
+            y_support = torch.cat([y_support, y_support_other], dim=1)
+            y_query = torch.cat([y_query, y_query_other], dim=1)
+            loss, acc = self.fast_adapt(x_support, x_query, y_support, y_query, local_learner, 5)
+
+            self.manual_backward(loss, )
+        for p in self.model.parameters():
+            if p.requires_grad and p.grad is not None:
+                p.grad.data.mul_(1. / self.task_size)
+        outer_optim.step()
+        with torch.no_grad():
+            query_set = self.task_generator.queries()
+            query_set = einops.rearrange(query_set, "b a c h w -> (b a) c h w")
+            _, z = self.model(query_set)
+            y_query_q = torch.arange(self.batch_size).unsqueeze(0).unsqueeze(2)  # batch and shot dim
+            y_query_q = y_query_q.repeat(1, 1, self.n_query - 3)
+            y_query_q = y_query_q.view(1, -1).to(self.device)
+            loss, acc = self.calculate_protoclr_loss(z, y_support, y_query_q, self.batch_size)  # y_supp doesn't matter
+
+        self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
+
+        return {"loss": loss, "accuracy": acc}
 
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
@@ -596,7 +544,7 @@ class MAMLCLR(pl.LightningModule):
         acc = accuracy(predictions, y_query)
         return loss, acc.item()
 
-    def std_proto_form(self, batch, batch_idx):
+    def std_proto_form(self, batch, batch_idx, sot=False):
         x_support = batch["train"][0]
         y_support = batch["train"][1]
         x_support = x_support
@@ -614,35 +562,36 @@ class MAMLCLR(pl.LightningModule):
         # Extract features (first dim is batch dim)
         x = torch.cat([x_support, x_query], 1)
         x = einops.rearrange(x, "1 b c h w -> b c h w")
-        if not (self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "instance"):
-            z = self.backbone(x)
-            z = einops.rearrange(z, "b c h w -> 1 b (c h w)")
-        else:
-            z = self.forward(x)
+        # includes GAT based adaptation
+        z = self.forward(x)
+        z = einops.rearrange(z, "b e -> 1 b e")
+
+        if sot:
+            sot = SOT(distance_metric=self.distance)
+            z = einops.rearrange(z, "1 b e -> b e")
+            z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support.squeeze(0))
             z = einops.rearrange(z, "b e -> 1 b e")
+        elif self.mpnn_opts["adapt"] == "ot":
+            transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
+                                                     stopping_criterion=1e-4, device=self.device)
+            z_a_i = self.forward(x_support.squeeze(0))
+            z_query = self.forward(x_query.squeeze(0))
+            z = torch.cat(transportation_module(z_a_i, z_query)).unsqueeze(0)
+            # sot = SOT(distance_metric=self.distance)
+            # z = einops.rearrange(z, "1 b e -> b e")
+            # z = sot.forward(z, n_samples=shots + test_shots, y_support=y_support.squeeze(0))
+            # z = einops.rearrange(z, "b e -> 1 b e")
+        elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "re_rep":
+            _, z = self.mpnn_forward(x)
+            z = torch.cat(self.re_represent(z, x_support.shape[1], self.alpha1, self.alpha2, 0.1))
+            z = einops.rearrange(z, "b e -> 1 b e")
+
         z_support = z[:, :self.eval_ways * shots]
         z_query = z[:, self.eval_ways * shots:]
-
         # Calucalte prototypes
         z_proto = get_prototypes(z_support, y_support, self.eval_ways)
-        # implementing GAT based adaptation:
-        if self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "task":
-            z_proto, z_query = einops.rearrange(z_proto, "1 b e -> b e"), einops.rearrange(z_query, "1 b e -> b e")
-            combined = torch.cat([z_proto, z_query])
-            edge_attr, edge_index, combined = self.graph_generator.get_graph(combined, Y=None)
-            _, (combined,) = self.gnn(combined, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-            z_proto, z_query = combined.split([self.eval_ways, len(z_query)])  # split based on number of prototypes
-            z_proto, z_query = einops.rearrange(z_proto, "b e -> 1 b e"), einops.rearrange(z_query, "b e -> 1 b e")
-        elif self.mpnn_opts["_use"] and self.mpnn_opts["adapt"] == "proto_only":
-            # adapt only the prototypes? like FEAT
-            z_proto = einops.rearrange(z_proto, "1 b e -> b e")
-            edge_attr, edge_index, z_proto = self.graph_generator.get_graph(z_proto)
-            _, (z_proto,) = self.gnn(z_proto, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-            z_proto = einops.rearrange(z_proto, "b e -> 1 b e")
-
         # Calculate loss and accuracies
-        loss, acc, _ = prototypical_loss(z_proto, z_query, y_query,
-                                         distance=self.distance)
+        loss, acc, _ = prototypical_loss(z_proto, z_query, y_query, distance=self.distance)
         return loss, acc
 
     @torch.enable_grad()
@@ -667,42 +616,6 @@ class MAMLCLR(pl.LightningModule):
         y_query, y_query_pred = label_finetuning(self.label_cleansing_opts, support_features, y_supp, y_query,
                                                  query_features)
         return y_query, y_query_pred
-
-    @torch.enable_grad()
-    def scl_finetuning(self, batch, batch_idx):
-        x_support = batch['train'][0][0]  # only take data & only first batch
-        x_support = x_support.to(self.device)
-        x_support_var = Variable(x_support)
-        x_query = batch['test'][0][0]  # only take data & only first batch
-        x_query = x_query.to(self.device)
-        x_query_var = Variable(x_query)
-        n_support = x_support.shape[0] // self.eval_ways
-        n_query = x_query.shape[0] // self.eval_ways
-
-        batch_size = self.eval_ways
-        support_size = self.eval_ways * n_support
-        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
-        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
-
-        augs = nn.Sequential(K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
-                             K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
-                             K.augmentation.RandomHorizontalFlip(),
-                             K.augmentation.RandomGrayscale(p=.2),
-                             K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
-                                                               sigma=(0.1, 2.0)))
-        aug_supp = torch.cat([augs(x_support_var) for _ in range(5)])
-        x_support_var = torch.cat([x_support_var, aug_supp])
-        y_supp = y_supp.repeat(5 + 1)
-        x = torch.cat([x_support_var, x_query_var])
-        _, spatial_f, _, z = self.scl_mpnn_forward(x)
-        z_support, z_query = z.split([len(x_support_var), len(x_query_var)])
-        finetuner = BaselineFinetune(n_ways=self.eval_ways, n_shots=n_support, n_aug_support_samples=5, n_queries=15,
-                                     feat_dim=z.shape[-1])
-        scores = finetuner.forward(z_support, y_supp, z_query, False, True)
-        loss = F.cross_entropy(scores, y_query, reduction='mean')
-        predictions = scores.argmax(dim=1)
-        acc = accuracy(predictions, y_query)
-        return loss, acc
 
     def _shared_eval_step(self, batch, batch_idx):
         loss = 0.
@@ -733,8 +646,6 @@ class MAMLCLR(pl.LightningModule):
                                               freeze_backbone=self.ft_freeze_backbone,
                                               finetune_batch_norm=self.finetune_batch_norm, n_way=self.eval_ways,
                                               inner_lr=self.sup_finetune_lr)
-        elif self.sup_finetune == "scl":
-            loss, acc = self.scl_finetuning(batch, batch_idx)
 
         self.load_state_dict(original_encoder_state)
         return loss, acc
