@@ -170,8 +170,9 @@ class ResNet(nn.Module):
         return out
 
 
-class GATResNet10:
+class GATResNet10(nn.Module):
     def __init__(self):
+        super(GATResNet10, self).__init__()
         self.backbone = ResNet10()
         self.mpnn_dev = "cuda"
         self.emb_dim = self.backbone(torch.randn(1, 3, 224, 224)).shape[-1]
