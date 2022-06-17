@@ -91,6 +91,7 @@ class MAMLCLR(pl.LightningModule):
     def __init__(self,
                  arch: str,
                  out_planes: Union[Iterable, int],
+                 average_end: bool,
                  n_support: int,
                  n_query: int,
                  batch_size: int,
@@ -139,7 +140,8 @@ class MAMLCLR(pl.LightningModule):
         if feature_extractor is not None:
             backbone = feature_extractor
         elif arch == "conv4":
-            backbone = create_model(dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=True))
+            backbone = create_model(
+                dict(in_planes=3, out_planes=self.out_planes, num_stages=4, average_end=average_end))
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
