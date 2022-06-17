@@ -220,7 +220,8 @@ class UnlabelledDataset(Dataset):
                 classes = [datasets[k][()] for k in datasets.keys()]
                 labels = [np.repeat([i], len(datasets[k][()])) for i, k in enumerate(class_names)]
                 labels = np.array(labels).flatten()
-            self.targets = LabelEncoder().fit_transform(labels)
+            if self.dataset == "miniimagenet":
+                self.targets = LabelEncoder().fit_transform(labels)
 
         # Optionally filter out some classes
         if n_classes is not None:
