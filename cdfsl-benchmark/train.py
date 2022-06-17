@@ -1,3 +1,4 @@
+import deepspeed.ops.adam
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,6 +8,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 import time
 import os
 import glob
+import deepspeed
 
 import configs
 import backbone
@@ -24,6 +26,8 @@ from datasets import (miniImageNet_few_shot, ISIC_few_shot, CropDisease_few_shot
 def train(base_loader, model, optimization, start_epoch, stop_epoch, params):
     if optimization == 'Adam':
         optimizer = torch.optim.Adam(model.parameters())
+    elif optimization == 'FusedAdam':
+        optimizer = deepspeed.ops.adam.FusedAdam(model.parameters(), lr=0.0001563663718906821)
     else:
         raise ValueError('Unknown optimization, please define by yourself')
 
