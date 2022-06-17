@@ -152,7 +152,7 @@ class TransformLoader:
             return method(self.image_size) 
         elif transform_type=='CenterCrop':
             return method(self.image_size) 
-        elif transform_type=='Scale':
+        elif transform_type=='Resize':
             return method([int(self.image_size*1.15), int(self.image_size*1.15)])
         elif transform_type=='Normalize':
             return method(**self.normalize_param )
@@ -161,12 +161,12 @@ class TransformLoader:
 
     def get_composed_transform(self, aug = False):
         if isinstance(aug, str):
-            transform_list = ['Scale','CenterCrop', aug, 'Normalize']
+            transform_list = ['Resize','CenterCrop', aug, 'Normalize']
         else:
             if aug:
-                transform_list = ['Scale','CenterCrop', 'SimCLR', 'ToTensor', 'Normalize']
+                transform_list = ['Resize','CenterCrop', 'SimCLR', 'ToTensor', 'Normalize']
             else:
-                transform_list = ['Scale','CenterCrop', 'ToTensor', 'Normalize']
+                transform_list = ['Resize','CenterCrop', 'ToTensor', 'Normalize']
 
         transform_funcs = [ self.parse_transform(x) for x in transform_list]
         transform = transforms.Compose(transform_funcs)
