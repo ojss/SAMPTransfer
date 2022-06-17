@@ -8,8 +8,6 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 from torch import nn
-from .gnn_base import GNNReID
-from .graph_generator import GraphGenerator
 
 
 class GATCLR(nn.Module):
@@ -29,6 +27,7 @@ class GATCLR(nn.Module):
         self.feature = model_func()
         self.top1 = utils.AverageMeter()
         self.shots = shots
+        self.loss_cnn = True
 
     def get_scores(self, z, ways, shots):
         z_support = z[:ways * shots]
@@ -76,7 +75,7 @@ class GATCLR(nn.Module):
         _, predicted = torch.max(scores.data, 1)
         correct = predicted.eq(y).cpu().sum()
         self.top1.update(correct.item() * 100 / (y.size(0) + 0.0), y.size(0))
-        if self.mpnn_opts["loss_cnn"]:
+        if self.loss_cnn:
             loss = self.loss_fn(scores, y)
         loss += self.loss_fn(gat_scores, y)
         return loss
