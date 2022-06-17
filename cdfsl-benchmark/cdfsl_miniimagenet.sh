@@ -45,4 +45,4 @@ echo '++++++++++++++++++++++++++++++++++++++++++++++++'
 echo '+++++      ProtoCLR: Miniimagenet            +++++'
 echo '++++++++++++++++++++++++++++++++++++++++++++++++'
 
-srun python train.py --dataset miniImagenet --method gatclr --stop_epoch 400 --n_support 1 --n_query 3 --no_aug_support
+srun python train.py --dataset miniImagenet --method gatclr --model GResNet10 --stop_epoch 400 --n_support 1 --n_query 3 --no_aug_support --batch_size 64

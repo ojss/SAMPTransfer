@@ -6,26 +6,32 @@ import math
 import numpy as np
 import torch.nn.functional as F
 from torch.nn.utils.weight_norm import WeightNorm
+from methods.gnn_base import GNNReID
+from methods.graph_generator import GraphGenerator
+
 
 def init_layer(L):
     # Initialization using fan-in
     if isinstance(L, nn.Conv2d):
-        n = L.kernel_size[0]*L.kernel_size[1]*L.out_channels
-        L.weight.data.normal_(0,math.sqrt(2.0/float(n)))
+        n = L.kernel_size[0] * L.kernel_size[1] * L.out_channels
+        L.weight.data.normal_(0, math.sqrt(2.0 / float(n)))
     elif isinstance(L, nn.BatchNorm2d):
         L.weight.data.fill_(1)
         L.bias.data.fill_(0)
 
+
 class Flatten(nn.Module):
     def __init__(self):
         super(Flatten, self).__init__()
-        
-    def forward(self, x):        
+
+    def forward(self, x):
         return x.view(x.size(0), -1)
+
 
 # Simple ResNet Block
 class SimpleBlock(nn.Module):
-    maml = False #Default
+    maml = False  # Default
+
     def __init__(self, indim, outdim, half_res):
         super(SimpleBlock, self).__init__()
         self.indim = indim
@@ -33,8 +39,8 @@ class SimpleBlock(nn.Module):
 
         self.C1 = nn.Conv2d(indim, outdim, kernel_size=3, stride=2 if half_res else 1, padding=1, bias=False)
         self.BN1 = nn.BatchNorm2d(outdim)
-    
-        self.C2 = nn.Conv2d(outdim, outdim,kernel_size=3, padding=1,bias=False)
+
+        self.C2 = nn.Conv2d(outdim, outdim, kernel_size=3, padding=1, bias=False)
         self.BN2 = nn.BatchNorm2d(outdim)
 
         self.relu1 = nn.ReLU(inplace=True)
@@ -45,7 +51,7 @@ class SimpleBlock(nn.Module):
         self.half_res = half_res
 
         # if the input number of channels is not equal to the output, then need a 1x1 convolution
-        if indim!=outdim:
+        if indim != outdim:
 
             self.shortcut = nn.Conv2d(indim, outdim, 1, 2 if half_res else 1, bias=False)
             self.BNshortcut = nn.BatchNorm2d(outdim)
@@ -71,17 +77,18 @@ class SimpleBlock(nn.Module):
         out = self.relu2(out)
         return out
 
+
 # Bottleneck block
 class BottleneckBlock(nn.Module):
     def __init__(self, indim, outdim, half_res):
         super(BottleneckBlock, self).__init__()
-        bottleneckdim = int(outdim/4)
+        bottleneckdim = int(outdim / 4)
         self.indim = indim
         self.outdim = outdim
 
-        self.C1 = nn.Conv2d(indim, bottleneckdim, kernel_size=1,  bias=False)
+        self.C1 = nn.Conv2d(indim, bottleneckdim, kernel_size=1, bias=False)
         self.BN1 = nn.BatchNorm2d(bottleneckdim)
-        self.C2 = nn.Conv2d(bottleneckdim, bottleneckdim, kernel_size=3, stride=2 if half_res else 1,padding=1)
+        self.C2 = nn.Conv2d(bottleneckdim, bottleneckdim, kernel_size=3, stride=2 if half_res else 1, padding=1)
         self.BN2 = nn.BatchNorm2d(bottleneckdim)
         self.C3 = nn.Conv2d(bottleneckdim, outdim, kernel_size=1, bias=False)
         self.BN3 = nn.BatchNorm2d(outdim)
@@ -90,9 +97,8 @@ class BottleneckBlock(nn.Module):
         self.parametrized_layers = [self.C1, self.BN1, self.C2, self.BN2, self.C3, self.BN3]
         self.half_res = half_res
 
-
         # if the input number of channels is not equal to the output, then need a 1x1 convolution
-        if indim!=outdim:
+        if indim != outdim:
 
             self.shortcut = nn.Conv2d(indim, outdim, 1, stride=2 if half_res else 1, bias=False)
 
@@ -103,7 +109,6 @@ class BottleneckBlock(nn.Module):
 
         for layer in self.parametrized_layers:
             init_layer(layer)
-
 
     def forward(self, x):
 
@@ -123,14 +128,14 @@ class BottleneckBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self,block,list_of_num_layers, list_of_out_dims, flatten = False):
+    def __init__(self, block, list_of_num_layers, list_of_out_dims, flatten=False):
         # list_of_num_layers specifies number of layers in each stage
         # list_of_out_dims specifies number of output channel for each stage
-        super(ResNet,self).__init__()
-        assert len(list_of_num_layers)==4, 'Can have only four stages'
+        super(ResNet, self).__init__()
+        assert len(list_of_num_layers) == 4, 'Can have only four stages'
 
         conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-                                           bias=False)
+                          bias=False)
         bn1 = nn.BatchNorm2d(64)
 
         relu = nn.ReLU()
@@ -145,7 +150,7 @@ class ResNet(nn.Module):
         for i in range(4):
 
             for j in range(list_of_num_layers[i]):
-                half_res = (i>=1) and (j==0)
+                half_res = (i >= 1) and (j == 0)
                 B = block(indim, list_of_out_dims[i], half_res)
                 trunk.append(B)
                 indim = list_of_out_dims[i]
@@ -156,16 +161,74 @@ class ResNet(nn.Module):
             trunk.append(Flatten())
             self.final_feat_dim = indim
         else:
-            self.final_feat_dim = [ indim, 7, 7]
+            self.final_feat_dim = [indim, 7, 7]
 
         self.trunk = nn.Sequential(*trunk)
 
-    def forward(self,x):
+    def forward(self, x):
         out = self.trunk(x)
         return out
 
-def ResNet10( flatten = True):
-    return ResNet(SimpleBlock, [1,1,1,1],[64,128,256,512], flatten)
+
+class GATResNet10:
+    def __init__(self):
+        self.backbone = ResNet10()
+        self.mpnn_dev = "cuda"
+        self.emb_dim = self.backbone(torch.randn(1, 3, 224, 224)).shape[-1]
+        self.mpnn_opts = {
+            "_use": True,
+            "loss_cnn": True,
+            "scaling_ce": 1,
+            "adapt": "ot",
+            "temperature": 0.2,
+            "output_train_gnn": "plain",
+            "graph_params": {
+                "sim_type": "correlation",
+                "thresh": "no",
+                "set_negative": "hard"},
+            "gnn_params": {
+                "pretrained_path": "no",
+                "red": 1,
+                "cat": 0,
+                "every": 0,
+                "gnn": {
+                    "num_layers": 1,
+                    "aggregator": "add",
+                    "num_heads": 2,
+                    "attention": "dot",
+                    "mlp": 1,
+                    "dropout_mlp": 0.1,
+                    "norm1": 1,
+                    "norm2": 1,
+                    "res1": 1,
+                    "res2": 1,
+                    "dropout_1": 0.1,
+                    "dropout_2": 0.1,
+                    "mult_attr": 0},
+                "classifier": {
+                    "neck": 0,
+                    "num_classes": 0,
+                    "dropout_p": 0.4,
+                    "use_batchnorm": 0}
+            }
+        }
+        self.gnn = GNNReID(self.mpnn_dev, self.mpnn_opts["gnn_params"], self.emb_dim)
+        self.graph_generator = GraphGenerator(self.mpnn_dev, **self.mpnn_opts["graph_params"])
+
+    def forward(self, x):
+        z_cnn = self.backbone(x)
+        z = z_cnn.flatten(1)
+        edge_attr, edge_index, z = self.graph_generator.get_graph(z)
+        _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
+        return z_cnn, z
+
+
+def GResNet10():
+    return GATResNet10()
+
+
+def ResNet10(flatten=True):
+    return ResNet(SimpleBlock, [1, 1, 1, 1], [64, 128, 256, 512], flatten)
 
 
 class ResNet18(nn.Module):
@@ -180,6 +243,3 @@ class ResNet18(nn.Module):
 
     def forward(self, x):
         return self.encoder(x)
-
-
-

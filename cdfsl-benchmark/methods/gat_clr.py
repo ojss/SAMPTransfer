@@ -29,47 +29,7 @@ class GATCLR(nn.Module):
         self.feature = model_func()
         self.top1 = utils.AverageMeter()
         self.shots = shots
-        self.mpnn_dev = "cuda"
         self.emb_dim = self.feature(torch.randn(1, 3, 224, 224)).shape[-1]
-        self.mpnn_opts = {
-            "_use": True,
-            "loss_cnn": True,
-            "scaling_ce": 1,
-            "adapt": "ot",
-            "temperature": 0.2,
-            "output_train_gnn": "plain",
-            "graph_params": {
-                "sim_type": "correlation",
-                "thresh": "no",
-                "set_negative": "hard"},
-            "gnn_params": {
-                "pretrained_path": "no",
-                "red": 1,
-                "cat": 0,
-                "every": 0,
-                "gnn": {
-                    "num_layers": 1,
-                    "aggregator": "add",
-                    "num_heads": 2,
-                    "attention": "dot",
-                    "mlp": 1,
-                    "dropout_mlp": 0.1,
-                    "norm1": 1,
-                    "norm2": 1,
-                    "res1": 1,
-                    "res2": 1,
-                    "dropout_1": 0.1,
-                    "dropout_2": 0.1,
-                    "mult_attr": 0},
-                "classifier": {
-                    "neck": 0,
-                    "num_classes": 0,
-                    "dropout_p": 0.4,
-                    "use_batchnorm": 0}
-            }
-        }
-        self.gnn = GNNReID(self.mpnn_dev, self.mpnn_opts["gnn_params"], self.emb_dim)
-        self.graph_generator = GraphGenerator(self.mpnn_dev, **self.mpnn_opts["graph_params"])
 
     def get_scores(self, z, ways, shots):
         z_support = z[:ways * shots]
@@ -101,14 +61,11 @@ class GATCLR(nn.Module):
 
         # Extract features
         x_both = torch.cat([x_support, x_query], 0)
-        z = self.feature(x_both)
+        z_cnn, z = self.feature(x_both)
 
-        scores = self.get_scores(z, ways, shots)
+        scores = self.get_scores(z_cnn, ways, shots)
 
         # GAT bits
-        z = z.flatten(1)
-        edge_attr, edge_index, z = self.graph_generator.get_graph(z)
-        _, (z,) = self.gnn(z, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
         gat_scores = self.get_scores(z, ways, shots)
 
         return scores, gat_scores, y_query
