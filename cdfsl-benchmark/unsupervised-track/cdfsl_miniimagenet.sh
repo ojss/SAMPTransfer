@@ -32,7 +32,7 @@
 
 module use /opt/insy/modulefiles
 
-module load cuda/11.1 cudnn/11.1-8.0.5.39
+module load cuda/11.3
 module load miniconda/3.9
 
 # Complex or heavy commands should be started with 'srun' (see 'man srun' for more information)
