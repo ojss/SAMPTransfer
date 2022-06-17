@@ -397,9 +397,12 @@ class ConfidenceIntervalCallback(pl.Callback):
     def on_test_end(self, trainer, pl_module) -> None:
         conf_interval = stats.t.interval(0.95, len(self.accuracies) - 1, loc=np.mean(self.accuracies),
                                          scale=stats.sem(self.accuracies))
+        mean_acc = np.mean(self.accuracies)
+        std_acc = np.std(self.accuracies)
+        print(f"Mean Accuracy: {mean_acc}")
         print(f"Confidence Interval: {conf_interval}")
         plt.ylabel("Average Test Accuracy")
-        plt.errorbar([1], np.mean(self.accuracies), yerr=np.std(self.accuracies), fmt='o', color='black',
+        plt.errorbar([1], mean_acc, yerr=std_acc, fmt='o', color='black',
                      ecolor='lightgray', elinewidth=3, capsize=0)
         if self.log_to_wb:
             wandb.log({'Confidence Interval': conf_interval})
