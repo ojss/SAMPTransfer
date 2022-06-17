@@ -29,7 +29,6 @@ class GATCLR(nn.Module):
         self.feature = model_func()
         self.top1 = utils.AverageMeter()
         self.shots = shots
-        self.emb_dim = self.feature(torch.randn(1, 3, 224, 224)).shape[-1]
 
     def get_scores(self, z, ways, shots):
         z_support = z[:ways * shots]
