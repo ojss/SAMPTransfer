@@ -657,7 +657,7 @@ class MAMLCLR(pl.LightningModule):
         self.log_dict({
             'val/loss': loss.detach(),
             'val/accuracy': acc
-        }, prog_bar=True, on_step=True)
+        }, prog_bar=True)
 
         return loss.item(), acc
 
