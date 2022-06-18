@@ -266,7 +266,7 @@ class MAMLCLR(pl.LightningModule):
                                                    temperature=self.mpnn_temperature)
             loss *= self.mpnn_opts["scaling_ce"]
             losses.append(loss)
-            self.log("loss_cnn", loss.item())
+            self.log("train/loss_cnn", loss.item())
 
         loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
                                                  ways, loss_fn=self.gnn_loss,
@@ -370,7 +370,7 @@ class MAMLCLR(pl.LightningModule):
             y_query_q = y_query_q.view(1, -1).to(self.device)
             loss, acc = self.calculate_protoclr_loss(z, y_support, y_query_q, self.batch_size)  # y_supp doesn't matter
 
-        self.log_dict({'loss': loss.item(), 'train_accuracy': acc}, prog_bar=True, on_epoch=True)
+        self.log_dict({'train/loss': loss.item(), 'train/accuracy': acc}, prog_bar=True, on_epoch=True)
 
         return {"loss": loss, "accuracy": acc}
 
@@ -655,9 +655,9 @@ class MAMLCLR(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
         self.log_dict({
-            'val_loss': loss.detach(),
-            'val_accuracy': acc
-        }, prog_bar=True, on_step=True, on_epoch=True)
+            'val/loss': loss.detach(),
+            'val/accuracy': acc
+        }, prog_bar=True, on_step=True)
 
         return loss.item(), acc
 
@@ -665,7 +665,7 @@ class MAMLCLR(pl.LightningModule):
         loss, acc = self._shared_eval_step(batch, batch_idx)
 
         self.log(
-            "test_loss",
+            "test/loss",
             loss.detach().item(),
             on_step=True,
             on_epoch=True,
@@ -673,7 +673,7 @@ class MAMLCLR(pl.LightningModule):
             logger=True,
         )
         self.log(
-            "test_acc",
+            "test/acc",
             acc,
             on_step=True,
             on_epoch=True,
