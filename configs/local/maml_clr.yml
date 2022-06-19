@@ -2,7 +2,7 @@ seed_everything: 72
 model:
   dataset: ${data.dataset}
   arch: conv4
-  average_end: false
+  average_end: true
   out_planes: 64
   gnn_type: gat
   optim: adam
@@ -21,6 +21,7 @@ model:
   img_orig_size: ${data.img_size_orig}
   batch_size: ${data.batch_size}
   task_size: 4
+  task_len: 16
   n_support: ${data.n_support}
   n_query: ${data.n_query}
   use_projector: False
@@ -86,6 +87,7 @@ model:
   feature_extractor: null
 trainer:
   gpus: -1
+  precision: 16
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 400

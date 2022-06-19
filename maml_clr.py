@@ -299,7 +299,7 @@ class MAMLCLR(pl.LightningModule):
         x = torch.cat([x_support, x_query], dim=0)
         for _ in range(adaptation_steps):
             _, z = learner(x)
-            adaptation_error, _ = self.calculate_protoclr_loss(z, y_support, y_query, self.batch_size)
+            adaptation_error, _ = self.calculate_protoclr_loss(z, y_support, y_query, self.task_size)
             learner.adapt(adaptation_error)
         query_set = self.task_generator.queries()
         query_set = einops.rearrange(query_set, "b a c h w -> (b a) c h w")
@@ -342,20 +342,6 @@ class MAMLCLR(pl.LightningModule):
             y_support = y_support.repeat(batch_size, 1, 1)
             y_support = y_support.view(batch_size, -1).to(self.device)
 
-            # othering the remaining set
-            x_support_other, x_query_other = other.split([1, 3], dim=1)
-            x_support_other = einops.rearrange(x_support_other, "b a c h w -> (b a) c h w")
-            x_query_other = einops.rearrange(x_query_other, "b a c h w -> (b a) c h w")
-
-            x_support = torch.cat([x_support, x_support_other])
-            x_query = torch.cat([x_query, x_query_other])
-
-            y_support_other = torch.tensor(ways + 1, dtype=torch.long, device=self.device).repeat(
-                x_support_other.size(0)).unsqueeze(0)
-            y_query_other = torch.tensor(ways + 1, dtype=torch.long, device=self.device).repeat(
-                x_query_other.size(0)).unsqueeze(0)
-            y_support = torch.cat([y_support, y_support_other], dim=1)
-            y_query = torch.cat([y_query, y_query_other], dim=1)
             loss, acc = self.fast_adapt(x_support, x_query, y_support, y_query, local_learner, 5)
 
             self.manual_backward(loss, )
