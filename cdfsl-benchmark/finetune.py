@@ -63,6 +63,7 @@ class ProtoClassifier():
         # Copied from methods/protonet.py "ProtoNet.set_forward()"
         # y_support is ignored (only for compatibility)
         z_support = z_support.contiguous()
+        breakpoint()
         if self.ot:
             transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False, max_iter=1000,
                                                      stopping_criterion=1e-4, device=self.dev)
@@ -148,6 +149,8 @@ def finetune(novel_loader, n_query=15, freeze_backbone=False,
                                                                     *x.size()[2:])  # (25, 3, 224, 224)
             pretrained_model.eval()
             z_a_i = pretrained_model(x_a_i.cuda())
+            if params.model == "GResNet10":
+                _, z_a_i = z_a_i
             pretrained_model.train()
 
             ###############################################################################################
@@ -157,8 +160,10 @@ def finetune(novel_loader, n_query=15, freeze_backbone=False,
                     transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False,
                                                              max_iter=1000,
                                                              stopping_criterion=1e-4, device=x.device)
-                    z_b_i = pretrained_model(x_b_i.cuda())
-                    z_a_i, _ = transportation_module(z_a_i, z_b_i)
+                z_b_i = pretrained_model(x_b_i.cuda())
+                if params.model == "GResNet10":
+                    _, z_b_i = z_b_i
+                z_a_i, z_b_i = transportation_module(z_a_i, z_b_i)
                 inner_lr = params.lr_rate
                 if proto_init:  # Initialise as distance classifer (distance to prototypes)
                     classifier.init_params_from_prototypes(z_a_i,
@@ -196,6 +201,8 @@ def finetune(novel_loader, n_query=15, freeze_backbone=False,
                         #####################################
 
                         output = pretrained_model(z_batch)
+                        if params.model == "GResNet10":
+                            _, output = output
                         output = classifier(output)
                         loss = loss_fn(output, y_batch)
 
@@ -212,13 +219,9 @@ def finetune(novel_loader, n_query=15, freeze_backbone=False,
             pretrained_model.eval()
 
             output = pretrained_model(x_b_i.cuda())
+            if params.model == "GResNet10":
+                _, output = output
             if adaptation:
-                if ot:
-                    transportation_module = OptimalTransport(regularization=0.05, learn_regularization=False,
-                                                             max_iter=1000,
-                                                             stopping_criterion=1e-4, device=x.device)
-                    z_b_i = pretrained_model(x_b_i.cuda())
-                    z_a_i, output = transportation_module(z_a_i, z_b_i)
                 scores = classifier(output)
             else:
                 scores = classifier(z_a_i, y_a_i, output)

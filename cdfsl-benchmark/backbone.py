@@ -215,6 +215,7 @@ class GATResNet10(nn.Module):
         }
         self.gnn = GNNReID(self.mpnn_dev, self.mpnn_opts["gnn_params"], self.emb_dim)
         self.graph_generator = GraphGenerator(self.mpnn_dev, **self.mpnn_opts["graph_params"])
+        self.final_feat_dim = self.backbone.final_feat_dim
 
     def forward(self, x):
         z_cnn = self.backbone(x)
