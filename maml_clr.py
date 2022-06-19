@@ -96,6 +96,7 @@ class MAMLCLR(pl.LightningModule):
                  n_query: int,
                  batch_size: int,
                  task_size: int,
+                 task_len: int,
                  lr_decay_step,
                  lr_decay_rate,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
@@ -179,6 +180,7 @@ class MAMLCLR(pl.LightningModule):
 
         self.mpnn_opts = mpnn_opts
         self.task_size = task_size
+        self.task_len = task_len
 
         self.dim = in_dim
         if mpnn_opts["_use"]:
@@ -316,7 +318,7 @@ class MAMLCLR(pl.LightningModule):
         outer_optim = self.optimizers()
         outer_optim.zero_grad()
         self.model.zero_grad()
-        for _ in range(self.task_size):
+        for _ in range(self.task_len):
             t, other = self.task_generator.sample()
             local_learner = self.model.clone()
 
