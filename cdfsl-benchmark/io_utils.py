@@ -6,6 +6,7 @@ import backbone
 
 model_dict = dict(
     ResNet10=backbone.ResNet10,
+    ResNet12=backbone.ResNet12,
     GResNet10=backbone.GResNet10
 )
 
