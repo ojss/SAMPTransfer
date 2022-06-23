@@ -220,7 +220,8 @@ class UnlabelledDataset(Dataset):
                 classes = [datasets[k][()] for k in datasets.keys()]
                 labels = [np.repeat([i], len(datasets[k][()])) for i, k in enumerate(class_names)]
                 labels = np.array(labels).flatten()
-            self.targets = LabelEncoder().fit_transform(labels)
+            if self.dataset == "miniimagenet":
+                self.targets = LabelEncoder().fit_transform(labels)
 
         # Optionally filter out some classes
         if n_classes is not None:
@@ -235,7 +236,7 @@ class UnlabelledDataset(Dataset):
         return self.data.shape[0]
 
     def __getitem__(self, index):
-        if self.dataset == 'cub':
+        if self.dataset == 'cub' or self.dataset == "tieredimagenet":
             image = Image.open(io.BytesIO(self.data[index])).convert('RGB')
         else:
             image = Image.fromarray(self.data[index])
