@@ -19,7 +19,7 @@ from io_utils import model_dict, parse_args, get_resume_file, get_best_file, get
 from optimal_transport import OptimalTransport
 from utils import *
 
-from datasets import ISIC_few_shot, EuroSAT_few_shot, CropDisease_few_shot, Chest_few_shot
+from datasets import ISIC_few_shot, EuroSAT_few_shot, CropDisease_few_shot, Chest_few_shot, miniImageNet_few_shot
 
 from tqdm import tqdm
 import sys
@@ -277,18 +277,24 @@ if __name__ == '__main__':
 
     novel_loaders.append((loader_name, novel_loader))
 
-    # loader_name         = "CropDisease"
-    # print ("Loading {}".format(loader_name))
-    # datamgr             =  CropDisease_few_shot.SetDataManager(image_size, n_eposide = iter_num, n_query = 15, **few_shot_params)
-    # novel_loader        = datamgr.get_data_loader(aug =False)
-
+    # loader_name = "CropDisease"
+    # print("Loading {}".format(loader_name))
+    # datamgr = CropDisease_few_shot.SetDataManager(image_size, n_eposide=iter_num, n_query=15, **few_shot_params)
+    # novel_loader = datamgr.get_data_loader(aug=False)
+    #
+    # novel_loaders.append((loader_name, novel_loader))
+    #
+    # loader_name = "ChestX"
+    # print("Loading {}".format(loader_name))
+    # datamgr = Chest_few_shot.SetDataManager(image_size, n_eposide=iter_num, n_query=15, **few_shot_params)
+    # novel_loader = datamgr.get_data_loader(aug=False)
     # novel_loaders.append((loader_name, novel_loader))
 
-    # loader_name         = "ChestX"
-    # print ("Loading {}".format(loader_name))
-    # datamgr             =  Chest_few_shot.SetDataManager(image_size, n_eposide = iter_num, n_query = 15, **few_shot_params)
-    # novel_loader        = datamgr.get_data_loader(aug =False)
-    # novel_loaders.append((loader_name, novel_loader))
+    loader_name = "MiniImageNet"
+    print(f"Loading {loader_name}")
+    datamgr = miniImageNet_few_shot.SetDataManager(image_size, n_eposide=iter_num, n_query=15, **few_shot_params)
+    novel_loader = datamgr.get_data_loader(aug=False)
+    novel_loaders.append((loader_name, novel_loader))
 
     #########################################################################
     # Print checkpoint path to be loaded
