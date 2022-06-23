@@ -236,7 +236,7 @@ class UnlabelledDataset(Dataset):
         return self.data.shape[0]
 
     def __getitem__(self, index):
-        if self.dataset == 'cub':
+        if self.dataset == 'cub' or self.dataset == "tieredimagenet":
             image = Image.open(io.BytesIO(self.data[index])).convert('RGB')
         else:
             image = Image.fromarray(self.data[index])
