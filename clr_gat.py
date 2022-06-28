@@ -29,6 +29,7 @@ from SCL.models.attention import AttentionSimilarity
 from SCL.models.contrast import ContrastResNet
 from dataloaders import UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model
+from feature_extractors.wrn import WideResNet
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
@@ -177,6 +178,8 @@ class CLRGAT(pl.LightningModule):
             backbone = nn.Sequential(*list(net.children())[:-1])
         elif arch in ["resnet12", "resnet12_wide"]:
             backbone = feature_extractors.feature_extractor.__dict__[arch]()
+        elif arch in ["wrn28_10"]:
+            backbone = WideResNet(depth=28, widen_factor=10)
         if not self.scl:
             _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
 
@@ -418,15 +421,21 @@ class CLRGAT(pl.LightningModule):
     @torch.enable_grad()
     def prototune(self, episode, device='cpu', proto_init=True,
                   freeze_backbone=False, finetune_batch_norm=False,
-                  inner_lr=0.001, total_epoch=15, n_way=5):
-        x_support = episode['train'][0][0]  # only take data & only first batch
-        x_support = x_support.to(device)
-        x_support_var = Variable(x_support)
-        x_query = episode['test'][0][0]  # only take data & only first batch
-        x_query = x_query.to(device)
-        x_query_var = Variable(x_query)
-        n_support = x_support.shape[0] // n_way
-        n_query = x_query.shape[0] // n_way
+                  inner_lr=0.001, total_epoch=15, n_way=5, n_support=5, n_query=15):
+        if self.img_orig_size == [224, 224]:
+            x, y = episode
+            x_query_var = x[:, n_support:, :, :, :].contiguous().view(n_way * n_query, *x.size()[2:])
+            x_support_var = x[:, :n_support, :, :, :].contiguous().view(n_way * n_support, *x.size()[2:])
+        else:
+
+            x_support = episode['train'][0][0]  # only take data & only first batch
+            x_support = x_support.to(device)
+            x_support_var = Variable(x_support)
+            x_query = episode['test'][0][0]  # only take data & only first batch
+            x_query = x_query.to(device)
+            x_query_var = Variable(x_query)
+            n_support = x_support.shape[0] // n_way
+            n_query = x_query.shape[0] // n_way
 
         batch_size = n_way
         support_size = n_way * n_support

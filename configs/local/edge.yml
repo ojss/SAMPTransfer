@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: conv4
+  arch: wrn28_10
   out_planes: 64
   average_end: false
   scl: false
@@ -88,6 +88,7 @@ model:
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5
+  precision: 16
   num_sanity_val_steps: 1
   fast_dev_run: 1
   max_epochs: 1500
@@ -122,7 +123,7 @@ data:
   #  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
-  batch_size: 64
+  batch_size: 8
   num_workers: 0
   tfm_method: vicreg
   img_size_orig: [ 84, 84 ]

@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .sinkhorn import Sinkhorn
+from sinkhorn import Sinkhorn
 
 
 class OptimalTransport(nn.Module):

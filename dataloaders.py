@@ -2,7 +2,7 @@
 
 __all__ = ['collate_task', 'collate_task_batch', 'get_episode_loader', 'UnlabelledDataset', 'get_cub_default_transform',
            'get_simCLR_transform', 'get_omniglot_transform', 'get_custom_transform', 'identity_transform',
-           'UnlabelledDataModule', 'OmniglotDataModule', 'MiniImagenetDataModule']
+           'UnlabelledDataModule']
 
 import io
 import json
@@ -20,10 +20,12 @@ from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
 from torchmeta.datasets.helpers import (omniglot, miniimagenet, tieredimagenet,
                                         cub, cifar_fs, doublemnist, triplemnist)
-from torchmeta.utils.data import BatchMetaDataLoader, MetaDataLoader
+from torchmeta.utils.data import MetaDataLoader
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import InterpolationMode
+
+from utils.full_size_loaders import miniImageNet_few_shot
 
 
 def collate_task(task):
@@ -40,7 +42,6 @@ def collate_task_batch(batch):
     return default_collate([collate_task(task) for task in batch])
 
 
-# Cell
 def get_episode_loader(dataset, datapath, ways, shots, test_shots, batch_size,
                        split, download=True, shuffle=True, num_workers=0, **kwargs):
     """Create an episode data loader for a torchmeta dataset. Can also
@@ -139,7 +140,6 @@ class ULDS(ImageFolder):
         return dict(origs=torch.cat(originals), views=torch.cat(view_list))
 
 
-# Cell
 class UnlabelledDataset(Dataset):
     def __init__(self, dataset, datapath, split, transform=None, tfm_method=None,
                  n_support=1, n_query=1, n_images=None, n_classes=None,
@@ -263,7 +263,6 @@ class UnlabelledDataset(Dataset):
                     labels=np.repeat(target, self.n_support + self.n_query) if self.dataset == "miniimagenet" else 0)
 
 
-# Cell
 def get_cub_default_transform(size):
     return transforms.Compose([
         transforms.Resize([int(size[0] * 1.5), int(size[1] * 1.5)]),
@@ -369,20 +368,13 @@ def vicreg_transforms(img_size):
 
 
 def AMDIM_transforms(image_size):
-    # flip_lr = transforms.RandomHorizontalFlip(p=0.5)
-    # col_jitter = transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8)
-    # img_jitter = transforms.RandomApply([RandomTranslateWithReflect(4)], p=0.8)
-    # rnd_gray = transforms.RandomGrayscale(p=0.25)
     transforms_list = [
         transforms.RandomResizedCrop(image_size),
         transforms.RandomHorizontalFlip(p=0.5),
-        # flip_lr,
         transforms.RandomApply([RandomTranslateWithReflect(4)], p=0.8),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8),
         transforms.RandomGrayscale(p=0.25),
         transforms.ToTensor(),
-        # transforms.Normalize(np.array([0.485, 0.456, 0.406]),
-        #                      np.array([0.229, 0.224, 0.225]))
     ]
     return transforms_list
 
@@ -391,8 +383,6 @@ def identity_transform(img_shape):
     return transforms.Compose([transforms.Resize(img_shape),
                                transforms.ToTensor()])
 
-
-# Cell
 
 class UnlabelledDataModule(pl.LightningDataModule):
     def __init__(self, dataset, datapath, split, transform=None, tfm_method=None, full_size_path=None,
@@ -470,180 +460,38 @@ class UnlabelledDataModule(pl.LightningDataModule):
         return dataloader_train
 
     def val_dataloader(self):
-        dataloader_val = get_episode_loader(self.dataset, self.datapath,
-                                            ways=self.eval_ways,
-                                            shots=self.eval_support_shots,
-                                            test_shots=self.eval_query_shots,
-                                            batch_size=1,
-                                            split='val',
-                                            shuffle=False,
-                                            **self.kwargs)
+        if self.img_size_orig == [224, 224]:
+            datamgr = miniImageNet_few_shot.SetDataManager(self.img_size_orig[0], n_way=self.eval_ways,
+                                                           n_support=self.eval_support_shots,
+                                                           n_query=self.eval_query_shots, split='val', n_eposide=15,
+                                                           miniImageNet_path=self.full_size_path + "/val")
+            dataloader_val = datamgr.get_data_loader(aug=False)
+        else:
+            dataloader_val = get_episode_loader(self.dataset, self.datapath,
+                                                ways=self.eval_ways,
+                                                shots=self.eval_support_shots,
+                                                test_shots=self.eval_query_shots,
+                                                batch_size=1,
+                                                split='val',
+                                                shuffle=False,
+                                                **self.kwargs)
         return dataloader_val
 
     def test_dataloader(self):
-        dataloader_test = get_episode_loader(self.dataset, self.datapath,
-                                             ways=self.eval_ways,
-                                             shots=self.eval_support_shots,
-                                             test_shots=self.eval_query_shots,
-                                             batch_size=1,
-                                             split='test',
-                                             shuffle=False,
-                                             num_workers=2,
-                                             **self.kwargs)
+        if self.img_size_orig == [224, 224]:
+            datamgr = miniImageNet_few_shot.SetDataManager(self.img_size_orig[0], n_way=self.eval_ways,
+                                                           n_support=self.eval_support_shots, n_eposide=1000,
+                                                           n_query=self.eval_query_shots, split='test',
+                                                           miniImageNet_path=self.full_size_path + "/test")
+            dataloader_test = datamgr.get_data_loader(aug=False)
+        else:
+            dataloader_test = get_episode_loader(self.dataset, self.datapath,
+                                                 ways=self.eval_ways,
+                                                 shots=self.eval_support_shots,
+                                                 test_shots=self.eval_query_shots,
+                                                 batch_size=1,
+                                                 split='test',
+                                                 shuffle=False,
+                                                 num_workers=2,
+                                                 **self.kwargs)
         return dataloader_test
-
-
-# Cell
-class OmniglotDataModule(pl.LightningDataModule):
-    def __init__(
-            self,
-            data_dir: str,
-            shots: int,
-            ways: int,
-            shuffle_ds: bool,
-            test_shots: int,
-            meta_train: bool,
-            download: bool,
-            batch_size: str,
-            shuffle: bool,
-            num_workers: int):
-        super().__init__()
-        self.data_dir = data_dir
-        self.shots = shots
-        self.ways = ways
-        self.shuffle_ds = shuffle_ds
-        self.test_shots = test_shots
-        self.meta_train = meta_train
-        self.download = download
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_workers = num_workers
-
-    def setup(self, stage=None):
-        self.task_dataset = omniglot(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=self.shuffle_ds,
-            test_shots=self.test_shots,
-            meta_train=self.meta_train,
-            download=self.download
-        )
-
-    def train_dataloader(self):
-        return BatchMetaDataLoader(
-            self.task_dataset,
-            batch_size=self.batch_size,
-            shuffle=self.shuffle,
-            num_workers=self.num_workers
-        )
-
-    def val_dataloader(self):
-        self.val_tasks = omniglot(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=self.shuffle_ds,
-            test_shots=self.test_shots,
-            meta_val=True,
-            download=self.download
-        )
-        return BatchMetaDataLoader(
-            self.val_tasks,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers
-        )
-
-    def test_dataloader(self):
-        self.test_tasks = omniglot(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=self.shuffle_ds,
-            test_shots=self.test_shots,
-            meta_test=True,
-            download=self.download
-        )
-        return BatchMetaDataLoader(
-            self.test_tasks,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers
-        )
-
-
-# Cell
-class MiniImagenetDataModule(pl.LightningDataModule):
-    def __init__(self,
-                 data_dir: str,
-                 shots: int,
-                 ways: int,
-                 shuffle_ds: bool,
-                 test_shots: int,
-                 meta_train: bool,
-                 download: bool,
-                 batch_size: str,
-                 shuffle: bool,
-                 num_workers: int):
-        self.data_dir = data_dir
-        self.shots = shots
-        self.ways = ways
-        self.shuffle_ds = shuffle_ds
-        self.test_shots = test_shots
-        self.meta_train = meta_train
-        self.download = download
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.num_workers = num_workers
-
-    def setup(self):
-        self.train_taskset = miniimagenet(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=self.shuffle_ds,
-            test_shots=self.test_shots,
-            meta_train=True,
-            download=self.download
-        )
-
-    def train_dataloader(self):
-        return BatchMetaDataLoader(
-            self.train_taskset,
-            shuffle=self.shuffle,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers
-        )
-
-    def val_dataloader(self):
-        self.val_taskset = miniimagenet(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=self.shuffle_ds,
-            test_shots=self.test_shots,
-            meta_val=True,
-            download=self.download
-        )
-        return BatchMetaDataLoader(
-            self.val_taskset,
-            shuffle=self.shuffle,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers
-        )
-
-    def test_dataloader(self):
-        self.test_taskset = miniimagenet(
-            self.data_dir,
-            shots=self.shots,
-            ways=self.ways,
-            shuffle=False,
-            test_shots=self.test_shots,
-            meta_test=True,
-            download=self.download
-        )
-        return BatchMetaDataLoader(
-            self.test_taskset,
-            shuffle=False,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers
-        )

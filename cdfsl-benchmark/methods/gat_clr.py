@@ -9,8 +9,9 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 from torch import nn
-from gnn_base import GNNReID
-from graph_generator import GraphGenerator
+from .gnn_base import GNNReID
+from .graph_generator import GraphGenerator
+
 
 class GATCLR(nn.Module):
     """Calculate the UMTRA-style loss on a batch of images.
