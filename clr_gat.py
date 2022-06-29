@@ -2,11 +2,9 @@ __all__ = ['CLRGAT', 'GNN']
 
 import copy
 import uuid
-from types import SimpleNamespace
 from typing import Optional, Iterable, Union, Tuple
 
 import einops
-import kornia as K
 import numpy as np
 import pl_bolts.optimizers
 import pytorch_lightning as pl
@@ -24,9 +22,6 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 import feature_extractors
-from SCL.losses import ContrastiveLoss
-from SCL.models.attention import AttentionSimilarity
-from SCL.models.contrast import ContrastResNet
 from dataloaders import UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model
 from feature_extractors.wrn import WideResNet
@@ -40,7 +35,7 @@ from utils.label_cleansing import label_finetuning
 from utils.optimal_transport import OptimalTransport
 from utils.rerepresentation import re_represent
 from utils.sk_finetuning import sinkhorned_finetuning
-from utils.sup_finetuning import Classifier, BaselineFinetune
+from utils.sup_finetuning import Classifier
 
 
 ######################
@@ -48,13 +43,12 @@ from utils.sup_finetuning import Classifier, BaselineFinetune
 
 class GNN(nn.Module):
     def __init__(self, backbone: nn.Module, emb_dim: int, mpnn_dev: str, mpnn_opts: dict, gnn_type: str = "gat",
-                 final_relu: bool = False, scl: bool = False):
+                 final_relu: bool = False):
         super(GNN, self).__init__()
         self.backbone = backbone
         self.emb_dim = emb_dim
         self.mpnn_opts = mpnn_opts
         self.gnn_type = gnn_type
-        self.scl = scl
         mpnn_dev = mpnn_dev
         if gnn_type == "gat_v2":
             self.gnn = GAT(in_channels=emb_dim, hidden_channels=emb_dim // 4, out_channels=emb_dim,
@@ -74,16 +68,7 @@ class GNN(nn.Module):
         else:
             self.relu_final = nn.Identity()
 
-    def scl_forward(self, x):
-        _, spatial_f, global_f, avg_pool_feat = self.backbone(x)
-        # todo: check if GNN out on avg_pool_feat vs projector out is better
-        edge_attr, edge_index, gnn_out = self.graph_generator.get_graph(avg_pool_feat)
-        _, (gnn_out,) = self.gnn(gnn_out, edge_index, edge_attr, self.mpnn_opts["output_train_gnn"])
-        return spatial_f, global_f, avg_pool_feat, gnn_out
-
     def forward(self, x):
-        if self.scl:
-            return self.scl_forward(x)
         if "gat" in self.gnn_type:
             z = self.backbone(x)
             z_cnn = z.clone()
@@ -122,8 +107,6 @@ class CLRGAT(pl.LightningModule):
                  use_projector: bool,
                  projector_h_dim: int,
                  projector_out_dim: int,
-                 scl: bool = False,
-                 att_feat_dim: int = 80,
                  gnn_type: str = "gat",
                  optim: str = 'adam',
                  dataset='omniglot',
@@ -152,7 +135,6 @@ class CLRGAT(pl.LightningModule):
         self.n_support = n_support
         self.n_query = n_query
         self.distance = distance
-        self.scl = scl
         self.out_planes = out_planes
 
         if feature_extractor is not None:
@@ -160,19 +142,6 @@ class CLRGAT(pl.LightningModule):
         elif arch == "conv4":
             backbone = create_model(
                 dict(in_planes=in_planes, out_planes=self.out_planes, num_stages=4, average_end=average_end))
-        elif "scl" in arch and self.scl:
-            model_name = arch.replace("scl_", "")
-            in_dim = hidden_size = 64
-            if model_name == "resnet12":
-                in_dim = hidden_size = 640
-            # TODO: careful about the feat_dim here. its for the projector
-            tmp = {"model": model_name, "dataset": "miniImageNet", "feat_dim": 80, "global_cont_loss": True,
-                   "spatial_cont_loss": True}
-            opt = SimpleNamespace(**tmp)
-            backbone = ContrastResNet(opt, 0)
-            self.spatial_attention = AttentionSimilarity(hidden_size=hidden_size, inner_size=att_feat_dim,
-                                                         aggregation="mean")
-            self.scl_criterion = ContrastiveLoss(temperature=10)
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
@@ -180,8 +149,8 @@ class CLRGAT(pl.LightningModule):
             backbone = feature_extractors.feature_extractor.__dict__[arch]()
         elif arch in ["wrn28_10"]:
             backbone = WideResNet(depth=28, widen_factor=10)
-        if not self.scl:
-            _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
+
+        _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
 
         self.weight_decay = weight_decay
         self.optim = optim
@@ -218,12 +187,12 @@ class CLRGAT(pl.LightningModule):
         self.dim = in_dim
         if mpnn_opts["_use"]:
             self.model = GNN(backbone, in_dim, mpnn_dev, mpnn_opts, gnn_type=gnn_type,
-                             final_relu=self.label_cleansing_opts["use"], scl=self.scl)
-            self.mpnn_temperature = mpnn_opts["temperature"]
-            if mpnn_loss_fn == "ce":
-                self.gnn_loss = F.cross_entropy
+                             final_relu=self.label_cleansing_opts["use"])
         else:
             self.model = backbone
+        self.mpnn_temperature = mpnn_opts["temperature"]
+        if mpnn_loss_fn == "ce":
+            self.gnn_loss = F.cross_entropy
 
         if self.use_projector:
             self.projection_head = NNCLRProjectionHead(in_dim, projector_h_dim, projector_out_dim)
@@ -251,9 +220,8 @@ class CLRGAT(pl.LightningModule):
         ret["optimizer"] = opt
 
         if self.lr_sch == 'cos':
-            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt,
-                                                             self.trainer.max_epochs * self.trainer.limit_train_batches)
-            ret = {'optimizer': opt, 'lr_scheduler': sch}
+            sch = torch.optim.lr_scheduler.CosineAnnealingLR(opt, self.trainer.estimated_stepping_batches)
+            ret = {'optimizer': opt, 'lr_scheduler': {'scheduler': sch, 'interval': 'step', 'frequency': 1}}
         elif self.lr_sch == 'cos_warmup':
             sch = pl_bolts.optimizers.LinearWarmupCosineAnnealingLR(opt,
                                                                     warmup_epochs=self.warmup_epochs * self.trainer.limit_train_batches,
@@ -271,10 +239,6 @@ class CLRGAT(pl.LightningModule):
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         return ret
 
-    def scl_mpnn_forward(self, x) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        spatial_f, global_f, avg_pool_feat, gnn_out = self.model(x)
-        return spatial_f, global_f, avg_pool_feat, gnn_out
-
     def mpnn_forward(self, x, y=None) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -282,16 +246,17 @@ class CLRGAT(pl.LightningModule):
         :param y: torch.Tensor
         :return: Tuple(z_cnn, z)
         """
-        z_cnn, z = self.model(x)
+        if self.mpnn_opts["_use"]:
+            z_cnn, z = self.model(x)
+        else:
+            z = self.model(x)
+            z_cnn = z.clone()
 
         return z_cnn, z
 
     def forward(self, x):
         if self.mpnn_opts["_use"]:
-            if self.scl:
-                _, _, _, z = self.model(x)
-            else:
-                _, z = self.model(x)
+            _, z = self.model(x)
         else:
             z = self.model(x).flatten(1)
         return z
@@ -302,44 +267,21 @@ class CLRGAT(pl.LightningModule):
                                       torch.cat([y_support, y_query], 1).squeeze())
         z = self.projection_head(z)
         if self.mpnn_opts["loss_cnn"]:
-            loss, _ = self.calculate_protoclr_loss(z_orig.flatten(1), y_support, y_query, ways,
-                                                   temperature=self.mpnn_temperature)
+            loss, acc = self.calculate_protoclr_loss(z_orig.flatten(1), y_support, y_query, ways,
+                                                     temperature=self.mpnn_temperature)
             loss *= self.mpnn_opts["scaling_ce"]
             losses.append(loss)
             self.log("train/loss_cnn", loss.item())
 
-        loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
-                                                 ways, loss_fn=self.gnn_loss,
-                                                 temperature=self.mpnn_temperature)
-        losses.append(loss)
+        if self.mpnn_opts["_use"]:
+            loss, acc = self.calculate_protoclr_loss(z, y_support, y_query,
+                                                     ways, loss_fn=self.gnn_loss,
+                                                     temperature=self.mpnn_temperature)
+            losses.append(loss)
         if self.use_hms:
             losses.append(self.hms(z, y_support, y_query))
         loss = sum(losses)
         return loss, acc, z
-
-    def scl_forward_pass(self, x_support, x_query, y_support, y_query, ways):
-        losses = []
-        spatial_f, global_f, avg_pool_feat, gnn_out = self.scl_mpnn_forward(torch.cat([x_support, x_query]))
-        # todo: see if this needs a projector head here in conjunction with ConvBlock impl
-        if self.mpnn_opts["loss_cnn"]:
-            loss, _ = self.calculate_protoclr_loss(global_f, y_support, y_query, ways,
-                                                   temperature=self.mpnn_temperature)
-            loss *= self.mpnn_opts["scaling_ce"]
-            losses.append(loss)
-            self.log("train/loss_cnn", loss.item())
-        if self.scl:
-            y = torch.cat([y_support, y_query], dim=-1)
-            y = einops.rearrange(y, "1 l -> l")
-            loss = self.scl_criterion(spatial_f, attention=self.spatial_attention, labels=y)
-            losses.append(loss)
-            self.log("train/loss_spatial", loss.item())
-
-        loss, acc = self.calculate_protoclr_loss(gnn_out, y_support, y_query,
-                                                 ways, loss_fn=self.gnn_loss,
-                                                 temperature=self.mpnn_temperature)
-        losses.append(loss)
-        loss = sum(losses)
-        return loss, acc, gnn_out
 
     def calculate_protoclr_loss(self, z, y_support, y_query, ways, loss_fn=F.cross_entropy, temperature=1.):
 
@@ -388,10 +330,7 @@ class CLRGAT(pl.LightningModule):
         # Extract features (first dim is batch dim)
         # e.g. [1,50*(n_support+n_query),*(3,84,84)]
         # x = torch.cat([x_support, x_query], 1)
-        if self.scl:
-            loss, acc, z = self.scl_forward_pass(x_support, x_query, y_support, y_query, ways)
-        else:
-            loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
+        loss, acc, z = self.mpnn_forward_pass(x_support, x_query, y_support, y_query, ways)
         self.log_dict({'train/loss': loss.item(), 'train/accuracy': acc}, prog_bar=True, on_epoch=True)
 
         return {"loss": loss, "accuracy": acc}
@@ -663,43 +602,7 @@ class CLRGAT(pl.LightningModule):
                                                  query_features)
         return y_query, y_query_pred
 
-    @torch.enable_grad()
-    def scl_finetuning(self, batch, batch_idx):
-        x_support = batch['train'][0][0]  # only take data & only first batch
-        x_support = x_support.to(self.device)
-        x_support_var = Variable(x_support)
-        x_query = batch['test'][0][0]  # only take data & only first batch
-        x_query = x_query.to(self.device)
-        x_query_var = Variable(x_query)
-        n_support = x_support.shape[0] // self.eval_ways
-        n_query = x_query.shape[0] // self.eval_ways
-
-        batch_size = self.eval_ways
-        support_size = self.eval_ways * n_support
-        y_supp = Variable(torch.from_numpy(np.repeat(range(self.eval_ways), n_support))).to(self.device)
-        y_query = torch.tensor(np.repeat(range(self.eval_ways), n_query)).to(self.device)
-
-        augs = nn.Sequential(K.augmentation.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.1, p=0.8),
-                             K.augmentation.RandomResizedCrop(size=self.img_orig_size, scale=(0.5, 1.)),
-                             K.augmentation.RandomHorizontalFlip(),
-                             K.augmentation.RandomGrayscale(p=.2),
-                             K.augmentation.RandomGaussianBlur(kernel_size=(3, 3),
-                                                               sigma=(0.1, 2.0)))
-        aug_supp = torch.cat([augs(x_support_var) for _ in range(5)])
-        x_support_var = torch.cat([x_support_var, aug_supp])
-        y_supp = y_supp.repeat(5 + 1)
-        x = torch.cat([x_support_var, x_query_var])
-        _, spatial_f, _, z = self.scl_mpnn_forward(x)
-        z_support, z_query = z.split([len(x_support_var), len(x_query_var)])
-        finetuner = BaselineFinetune(n_ways=self.eval_ways, n_shots=n_support, n_aug_support_samples=5, n_queries=15,
-                                     feat_dim=z.shape[-1])
-        scores = finetuner.forward(z_support, y_supp, z_query, False, True)
-        loss = F.cross_entropy(scores, y_query, reduction='mean')
-        predictions = scores.argmax(dim=1)
-        acc = accuracy(predictions, y_query)
-        return loss.detach().item(), acc
-
-    def hms(self, instance_embs, y_support, y_query):
+    def hms(self, instance_embs, y_query):
         sim = self.similarity(instance_embs.detach(), instance_embs.detach())
         way = self.batch_size
 

@@ -1,14 +1,12 @@
 seed_everything: 72
 model:
-  arch: wrn28_10
+  arch: resnet12
   out_planes: 64
   average_end: false
-  scl: false
   distance: euclidean
-  att_feat_dim: 80
   gnn_type: gat
   optim: adam
-  lr_sch: step
+  lr_sch: cos
   warmup_start_lr: 1e-3
   warmup_epochs: 250
   sup_finetune_lr: 0.0001563663718906821
@@ -51,7 +49,7 @@ model:
   mpnn_dev: cuda
   mpnn_opts:
     _use: True
-    loss_cnn: False
+    loss_cnn: True
     scaling_ce: 1
     adapt: ot
     temperature: 0.2
@@ -90,9 +88,9 @@ trainer:
   #  gradient_clip_val: 0.5
   precision: 16
   num_sanity_val_steps: 1
-  fast_dev_run: 1
+  fast_dev_run: 0
   max_epochs: 1500
-  limit_train_batches: 100
+#  limit_train_batches: 100
   limit_val_batches: 15
   callbacks:
     - class_path: pytorch_lightning.callbacks.model_summary.ModelSummary
@@ -119,13 +117,14 @@ data:
   dataset: "miniimagenet"
   #  datapath: ../data/
   datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
+  full_size_path: /home/ojass/projects/data/miniimagenet_84
   #  full_size_path: ../data/processed_images
   n_support: 1
   n_query: 3
-  batch_size: 8
+  batch_size: 16
   num_workers: 0
   tfm_method: vicreg
+  use_folder: true
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

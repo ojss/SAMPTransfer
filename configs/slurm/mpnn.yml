@@ -1,13 +1,11 @@
 seed_everything: 72
 model:
   dataset: ${data.dataset}
-  arch: conv4
+  arch: resnet12
   out_planes: 64
   in_planes: 3
   average_end: false
-  scl: false
   distance: euclidean
-  att_feat_dim: 80
   gnn_type: gat
   optim: adam
   lr_sch: step
@@ -17,7 +15,7 @@ model:
   sup_finetune: prototune # [prototune, std_proto, label_cleansing, sinkhorn]
   sup_finetune_epochs: 15
   eta_min: 5e-5
-  lr: 0.0001563663718906821
+  lr: 0.00036683239911604993
   lr_decay_step: 25000
   lr_decay_rate: 0.5
   weight_decay: 6.059722614369727e-06
@@ -25,7 +23,7 @@ model:
   batch_size: ${data.batch_size}
   n_support: ${data.n_support}
   n_query: ${data.n_query}
-  use_projector: true
+  use_projector: false
   projector_h_dim: 2048
   projector_out_dim: 512
   use_hms: false
@@ -70,7 +68,7 @@ model:
       gnn:
         num_layers: 1 # for gatv2
         aggregator: "add"
-        num_heads: 2
+        num_heads: 4
         attention: "dot"
         mlp: 1
         dropout_mlp: 0.1
@@ -93,7 +91,7 @@ trainer:
   fast_dev_run: False
   max_epochs: 1000
   check_val_every_n_epoch: 5
-  limit_train_batches: 300
+#  limit_train_batches: 100
   limit_val_batches: 15
   limit_test_batches: 600
   logger:
@@ -126,12 +124,13 @@ trainer:
 data:
   dataset: "miniimagenet"
   datapath: /home/nfs/oshirekar/unsupervised_ml/data/
-  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniImageNetFullSize/
+  full_size_path: /home/nfs/oshirekar/unsupervised_ml/data/miniimagenet_84/
   n_support: 1
   n_query: 3
-  batch_size: 64
+  batch_size: 128
   num_workers: 8
   tfm_method: vicreg
+  use_folder: true
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

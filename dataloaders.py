@@ -115,7 +115,10 @@ class ULDS(ImageFolder):
         self.no_aug_query = no_aug_query
         self.img_size_orig = img_size_orig
         self.img_size_crop = img_size_crop
-        self.transform = get_custom_transform(self.img_size_crop)
+        if transform is not None:
+            self.transform = get_transforms(transform, self.img_size_crop)
+        else:
+            self.transform = get_custom_transform(self.img_size_crop)
         self.original_transform = identity_transform(self.img_size_orig)
 
     def __getitem__(self, idx):
@@ -184,7 +187,7 @@ class UnlabelledDataset(Dataset):
             if tfm_method is not None:
                 self.transform = get_transforms(tfm_method, self.img_size_crop)
                 self.original_transform = identity_transform(self.img_size_orig)
-            if self.dataset == 'cub':
+            elif self.dataset == 'cub':
                 self.transform = transforms.Compose([
                     get_cub_default_transform(self.img_size_crop),
                     get_custom_transform(self.img_size_crop)])
@@ -389,7 +392,7 @@ class UnlabelledDataModule(pl.LightningDataModule):
                  n_support=1, n_query=1, n_images=None, n_classes=None, batch_size=50, num_workers=8,
                  seed=10, no_aug_support=False, no_aug_query=False, merge_train_val=True, mode='val',
                  eval_ways=5, eval_support_shots=5, eval_query_shots=15, img_size_orig=(224, 224),
-                 img_size_crop=(84, 84), **kwargs):
+                 img_size_crop=(84, 84), use_folder=False, **kwargs):
         super().__init__()
 
         self.n_images = n_images
@@ -410,6 +413,8 @@ class UnlabelledDataModule(pl.LightningDataModule):
         self.datapath = datapath
         self.full_size_path = full_size_path
 
+        self.use_folder = use_folder
+
         self.mode = mode
 
         self.eval_ways = eval_ways
@@ -427,6 +432,12 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                       no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
                                       img_size_crop=self.img_size,
                                       img_size_orig=self.img_size_orig)
+        elif self.use_folder and self.img_size_orig == [84, 84]:
+            self.dataset_train = ULDS(self.full_size_path, split='train', transform=self.tfm_method, n_images=self.n_images,
+                                      n_classes=self.n_classes, n_support=self.n_support, n_query=self.n_query,
+                                      no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
+                                      img_size_crop=self.img_size,
+                                      img_size_orig=self.img_size_orig)
         else:
             self.dataset_train = UnlabelledDataset(self.dataset,
                                                    self.datapath, split='train',
@@ -439,17 +450,23 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                                    no_aug_support=self.no_aug_support,
                                                    no_aug_query=self.no_aug_query,
                                                    img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
-            if self.merge_train_val:
-                dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
-                                                transform=None,
-                                                tfm_method=self.tfm_method,
-                                                n_support=self.n_support,
-                                                n_query=self.n_query,
-                                                no_aug_support=self.no_aug_support,
-                                                no_aug_query=self.no_aug_query,
-                                                img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
+        if self.merge_train_val and not self.use_folder:
+            dataset_val = UnlabelledDataset(self.dataset, self.datapath, 'val',
+                                            transform=None,
+                                            tfm_method=self.tfm_method,
+                                            n_support=self.n_support,
+                                            n_query=self.n_query,
+                                            no_aug_support=self.no_aug_support,
+                                            no_aug_query=self.no_aug_query,
+                                            img_size_crop=self.img_size, img_size_orig=self.img_size_orig)
+        elif self.merge_train_val and self.use_folder and self.img_size_orig == [84, 84]:
+            dataset_val = ULDS(self.full_size_path, split='val', transform=self.tfm_method, n_images=self.n_images,
+                               n_classes=self.n_classes, n_support=self.n_support, n_query=self.n_query,
+                               no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
+                               img_size_crop=self.img_size,
+                               img_size_orig=self.img_size_orig)
 
-                self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
+        self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
 
     def train_dataloader(self):
         dataloader_train = DataLoader(self.dataset_train,
