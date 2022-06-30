@@ -371,14 +371,14 @@ def vicreg_transforms(img_size):
 
 
 def AMDIM_transforms(image_size):
-    transforms_list = [
+    transforms_list = transforms.Compose([
         transforms.RandomResizedCrop(image_size),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomApply([RandomTranslateWithReflect(4)], p=0.8),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8),
         transforms.RandomGrayscale(p=0.25),
         transforms.ToTensor(),
-    ]
+    ])
     return transforms_list
 
 
@@ -433,7 +433,8 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                       img_size_crop=self.img_size,
                                       img_size_orig=self.img_size_orig)
         elif self.use_folder and self.img_size_orig == [84, 84]:
-            self.dataset_train = ULDS(self.full_size_path, split='train', transform=self.tfm_method, n_images=self.n_images,
+            self.dataset_train = ULDS(self.full_size_path, split='train', transform=self.tfm_method,
+                                      n_images=self.n_images,
                                       n_classes=self.n_classes, n_support=self.n_support, n_query=self.n_query,
                                       no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
                                       img_size_crop=self.img_size,
