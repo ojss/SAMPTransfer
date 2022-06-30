@@ -9,8 +9,8 @@ from torch.nn.utils import weight_norm
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
-from .sinkhorn import Sinkhorn2
-from .sup_finetuning import Classifier
+from optimal_transport.sinkhorn import Sinkhorn2
+from utils.sup_finetuning import Classifier
 
 
 def euclidean_distance(x, y):

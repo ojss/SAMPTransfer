@@ -21,19 +21,19 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
-from dataloaders import UnlabelledDataModule
+from dataloaders.dataloaders import UnlabelledDataModule
 from feature_extractors import networks
 from feature_extractors.feature_extractor import create_model
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from graph.latentgnn import LatentGNNV1
+from optimal_transport.optimal_transport import OptimalTransport
+from optimal_transport.sk_finetuning import sinkhorned_finetuning
 from optimal_transport.sot import SOT
-from proto_utils import (get_prototypes, prototypical_loss, euclidean_distance)
 from utils.label_cleansing import label_finetuning
-from utils.optimal_transport import OptimalTransport
+from utils.proto_utils import get_prototypes, prototypical_loss, euclidean_distance
 from utils.rerepresentation import re_represent
-from utils.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
 
 

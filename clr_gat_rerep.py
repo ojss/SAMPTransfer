@@ -24,9 +24,9 @@ from tqdm.auto import tqdm
 from clr_gat import GNN
 from dataloaders import UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model
-from proto_utils import (get_prototypes,
-                         prototypical_loss, euclidean_distance)
-from utils.sk_finetuning import sinkhorned_finetuning
+from utils.proto_utils import (get_prototypes,
+                               prototypical_loss, euclidean_distance)
+from optimal_transport.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
 
 

@@ -11,7 +11,7 @@ from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
 from optimal_transport.sot import SOT
-from proto_utils import get_prototypes, prototypical_loss
+from utils.proto_utils import get_prototypes, prototypical_loss
 
 
 class Classifier(nn.Module):

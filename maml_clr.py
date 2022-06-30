@@ -30,12 +30,12 @@ from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
 from graph.latentgnn import LatentGNNV1
 from optimal_transport.sot import SOT
-from proto_utils import (get_prototypes,
-                         prototypical_loss)
+from utils.proto_utils import (get_prototypes,
+                               prototypical_loss)
 from utils.label_cleansing import label_finetuning
-from utils.optimal_transport import OptimalTransport
+from optimal_transport.optimal_transport import OptimalTransport
 from utils.rerepresentation import re_represent
-from utils.sk_finetuning import sinkhorned_finetuning
+from optimal_transport.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier
 from utils.task_generator import TaskGen
 

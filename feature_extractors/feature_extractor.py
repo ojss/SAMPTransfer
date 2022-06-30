@@ -1,11 +1,9 @@
 import math
-from typing import Optional
 
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 
-import vision_transformer as vits
+from feature_extractors import vision_transformer as vits
 from bow import bow_utils as utils
 
 

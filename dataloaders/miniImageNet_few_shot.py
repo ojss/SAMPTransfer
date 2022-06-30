@@ -10,7 +10,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import sys
 
-sys.path.append("../../")
+sys.path.append("../")
 from .contrastive_augmentations import get_simCLR_transform, get_chestX_transform, ImageJitter
 
 identity = lambda x: x

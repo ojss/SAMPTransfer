@@ -1,6 +1,6 @@
 seed_everything: 72
 model:
-  arch: resnet12
+  arch: conv4
   out_planes: 64
   dataset: ${data.dataset}
   average_end: false
@@ -89,7 +89,7 @@ trainer:
   #  gradient_clip_val: 0.5
   precision: 16
   num_sanity_val_steps: 1
-  fast_dev_run: 0
+  fast_dev_run: 1
   max_epochs: 1500
 #  limit_train_batches: 100
   limit_val_batches: 15

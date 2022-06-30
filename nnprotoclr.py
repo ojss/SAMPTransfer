@@ -26,9 +26,9 @@ from tqdm.auto import tqdm
 from clr_gat import GNN
 from dataloaders import get_episode_loader, UnlabelledDataModule
 from feature_extractors.feature_extractor import create_model, resnet12_wide, resnet12
-from proto_utils import get_prototypes, prototypical_loss
-from utils.optimal_transport import OptimalTransport
-from utils.sk_finetuning import sinkhorned_finetuning
+from utils.proto_utils import get_prototypes, prototypical_loss
+from optimal_transport.optimal_transport import OptimalTransport
+from optimal_transport.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
 import torch.distributed as dist
 

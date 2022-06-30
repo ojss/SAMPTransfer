@@ -26,8 +26,8 @@ from tqdm.auto import tqdm
 
 from clr_gat import GNN
 from dataloaders import get_episode_loader
-from utils.optimal_transport import OptimalTransport
-from utils.sk_finetuning import sinkhorned_finetuning
+from optimal_transport.optimal_transport import OptimalTransport
+from optimal_transport.sk_finetuning import sinkhorned_finetuning
 from utils.sup_finetuning import Classifier, std_proto_form
 
 

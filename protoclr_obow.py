@@ -27,8 +27,8 @@ from dataloaders import UnlabelledDataModule
 from feature_extractors.feature_extractor import CNN_4Layer
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
-from proto_utils import (get_prototypes,
-                         prototypical_loss)
+from utils.proto_utils import (get_prototypes,
+                               prototypical_loss)
 from utils.sup_finetuning import Classifier
 
 
