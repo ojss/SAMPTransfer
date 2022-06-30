@@ -2,6 +2,7 @@ seed_everything: 72
 model:
   arch: resnet12
   out_planes: 64
+  dataset: ${data.dataset}
   average_end: false
   distance: euclidean
   gnn_type: gat

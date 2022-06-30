@@ -21,10 +21,9 @@ from torch.autograd import Variable
 from torchmetrics.functional import accuracy
 from tqdm.auto import tqdm
 
-import feature_extractors
 from dataloaders import UnlabelledDataModule
+from feature_extractors import networks
 from feature_extractors.feature_extractor import create_model
-from feature_extractors.wrn import WideResNet
 from graph.gat_v2 import GAT
 from graph.gnn_base import GNNReID
 from graph.graph_generator import GraphGenerator
@@ -142,15 +141,13 @@ class CLRGAT(pl.LightningModule):
         elif arch == "conv4":
             backbone = create_model(
                 dict(in_planes=in_planes, out_planes=self.out_planes, num_stages=4, average_end=average_end))
+            _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
         elif arch in torchvision.models.__dict__.keys():
             net = torchvision.models.__dict__[arch](pretrained=False)
             backbone = nn.Sequential(*list(net.children())[:-1])
-        elif arch in ["resnet12", "resnet12_wide"]:
-            backbone = feature_extractors.feature_extractor.__dict__[arch]()
-        elif arch in ["wrn28_10"]:
-            backbone = WideResNet(depth=28, widen_factor=10)
-
-        _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
+            _, in_dim = backbone(torch.randn(self.batch_size, in_planes, *img_orig_size)).flatten(1).shape
+        elif arch in ["resnet12", "resnet12_wide", "wrn_28_10"]:
+            backbone, in_dim = networks.get_featnet(arch, inputW=84, inputH=84, dataset=self.dataset)
 
         self.weight_decay = weight_decay
         self.optim = optim
