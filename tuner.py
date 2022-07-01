@@ -12,7 +12,8 @@ from ray.tune.schedulers import PopulationBasedTraining
 from wasabi import msg
 
 from clr_gat import CLRGAT
-from dataloaders import UnlabelledDataModule
+from dataloaders.dataloaders import UnlabelledDataModule
+
 
 def train_gat_clr_tune_checkpoint(config,
                                   checkpoint_dir=None,
@@ -41,7 +42,7 @@ def train_gat_clr_tune_checkpoint(config,
     if checkpoint_dir:
         kwargs["resume_from_checkpoint"] = os.path.join(checkpoint_dir, "checkpoint")
 
-    datamodule = UnlabelledDataModule(dataset='miniimagenet',
+    datamodule = UnlabelledDataModule(dataset='tieredimagenet',
                                       datapath=data_dir,
                                       batch_size=64,
                                       num_workers=4,
@@ -64,10 +65,9 @@ def train_gat_clr_tune_checkpoint(config,
 
 def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="~/data"):
     config = {
-        "arch": "conv4",
+        "arch": "resnet12",
         "out_planes": 64,
         "average_end": False,
-        "scl": False,
         "distance": tune.choice(["euclidean", "cosine"]),
         "att_feat_dim": 80,
         "gnn_type": "gat",
@@ -75,7 +75,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         "lr_sch": tune.choice(["step", "cos"]),
         "warmup_start_lr": 1e-3,
         "warmup_epochs": 250,
-        "sup_finetune_lr": tune.loguniform(1e-6, 1e-3),
+        "sup_finetune_lr": tune.loguniform(1e-6, 1e-4),
         "sup_finetune": "prototune",  # [prototune, std_proto, label_cleansing, sinkhorn]
         "sup_finetune_epochs": tune.randint(15, 20),
         "eta_min": 5e-5,
@@ -83,7 +83,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         "lr_decay_step": 25000,
         "lr_decay_rate": 0.5,
         "weight_decay": 6.059722614369727e-06,
-        "dataset": "miniimagenet",
+        "dataset": "tieredimagenet",
         "img_orig_size": (84, 84),
         "batch_size": 64,
         "n_support": 1,
@@ -119,7 +119,7 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
             "_use": True,
             "loss_cnn": True,
             "scaling_ce": tune.loguniform(1e-1, 1e0),
-            "adapt": tune.choice(["ot", "instance"]),
+            "adapt": "ot",
             "temperature": tune.loguniform(1e-1, 1e0),
             "output_train_gnn": "plain",
             "graph_params": {
@@ -194,5 +194,5 @@ if __name__ == "__main__":
     num_cpus = int(sys.argv[2])
     with msg.loading("Init Ray"):
         ray.init(address=os.environ["ip_head"])
-    tune_gat_clr_pbt(100, num_epochs=50, gpus_per_trial=1,
+    tune_gat_clr_pbt(30, num_epochs=200, gpus_per_trial=1,
                      data_dir="/home/nfs/oshirekar/unsupervised_ml/data/")
