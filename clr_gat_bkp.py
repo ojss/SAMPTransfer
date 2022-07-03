@@ -62,7 +62,6 @@ class CLRGAT(pl.LightningModule):
                  batch_size,
                  lr_decay_step,
                  lr_decay_rate,
-                 feature_extractor: nn.Module,
                  mpnn_loss_fn: Optional[Union[Optional[nn.Module], Optional[str]]],
                  mpnn_opts: dict,
                  mpnn_dev: str,
@@ -84,7 +83,8 @@ class CLRGAT(pl.LightningModule):
                  sup_finetune_lr=1e-3,
                  sup_finetune_epochs=15,
                  ft_freeze_backbone=True,
-                 finetune_batch_norm=False):
+                 finetune_batch_norm=False,
+                 feature_extractor: Optional[nn.Module] = None):
         super().__init__()
         self.save_hyperparameters()
 
@@ -187,6 +187,9 @@ class CLRGAT(pl.LightningModule):
             ret = {'optimizer': opt, 'lr_scheduler': sch}
         elif self.lr_sch == 'step':
             sch = torch.optim.lr_scheduler.StepLR(opt, step_size=self.lr_decay_step, gamma=self.lr_decay_rate)
+            ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
+        elif self.lr_sch == 'multistep':
+            sch = torch.optim.lr_scheduler.MultiStepLR(opt, milestones=[self.lr_decay_step], gamma=self.lr_decay_rate)
             ret['lr_scheduler'] = {'scheduler': sch, 'interval': 'step'}
         elif self.lr_sch == "one_cycle":
             sch = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=self.lr,
