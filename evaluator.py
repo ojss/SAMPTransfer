@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 
 from callbacks import ConfidenceIntervalCallback
 from clr_gat import CLRGAT
-from dataloaders import UnlabelledDataModule
+from dataloaders.dataloaders import UnlabelledDataModule
 
 app = typer.Typer()
 

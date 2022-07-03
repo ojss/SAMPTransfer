@@ -69,7 +69,6 @@ def tune_gat_clr_pbt(num_samples=50, num_epochs=10, gpus_per_trial=1, data_dir="
         "out_planes": 64,
         "average_end": False,
         "distance": tune.choice(["euclidean", "cosine"]),
-        "att_feat_dim": 80,
         "gnn_type": "gat",
         "optim": "adam",
         "lr_sch": tune.choice(["step", "cos"]),

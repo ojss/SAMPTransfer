@@ -49,7 +49,7 @@ model:
   mpnn_loss_fn: ce
   mpnn_dev: cuda
   mpnn_opts:
-    _use: True
+    _use: False
     loss_cnn: True
     scaling_ce: 1
     adapt: ot
@@ -83,7 +83,13 @@ model:
         num_classes: 0
         dropout_p: 0.4
         use_batchnorm: 0
-  feature_extractor: null
+  feature_extractor:
+    class_path: feature_extractors.feature_extractor.CNN_4Layer
+    init_args:
+      global_pooling: False
+      in_channels: 3
+      final_maxpool: True
+      ada_maxpool: False
 trainer:
   gpus: -1
   #  gradient_clip_val: 0.5
@@ -115,7 +121,7 @@ trainer:
         logging_interval: "step"
 
 data:
-  dataset: "miniimagenet"
+  dataset: "tieredimagenet"
   #  datapath: ../data/
   datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
   full_size_path: /home/ojass/projects/data/miniimagenet_84
@@ -125,7 +131,7 @@ data:
   batch_size: 16
   num_workers: 0
   tfm_method: vicreg
-  use_folder: true
+  use_folder: false
   img_size_orig: [ 84, 84 ]
   img_size_crop: [ 84, 84 ]
   no_aug_support: True

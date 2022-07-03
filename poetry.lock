@@ -2672,6 +2672,14 @@ optional = false
 python-versions = ">=3.6"
 
 [[package]]
+name = "torch-summary"
+version = "1.4.5"
+description = "Model summary in PyTorch, based off of the original torchsummary."
+category = "dev"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
 name = "torchattacks"
 version = "3.2.6"
 description = "Adversarial Attacks for PyTorch"
@@ -2988,7 +2996,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = "3.9"
-content-hash = "8732194ebce7e928e62bc6372a44c00190927120bfebad7523c0994719dcbb40"
+content-hash = "e8d28bd09927276a9ea6d8beefeb09b7d234657988cb05ae9aaffe058c5045a0"
 
 [metadata.files]
 absl-py = [
@@ -4801,6 +4809,10 @@ torch-sparse = [
 ]
 torch-spline-conv = [
     {file = "torch_spline_conv-1.2.1.tar.gz", hash = "sha256:364f658e0ecb4c5263a728c2961553e022fc44c11a633d5a1bf986cf169ab438"},
+]
+torch-summary = [
+    {file = "torch_summary-1.4.5-py3-none-any.whl", hash = "sha256:6127efb631f34ba8cbd28e92e8f7ddc2903ea0cbc44c80f15b7363b8f558cd8c"},
+    {file = "torch_summary-1.4.5.tar.gz", hash = "sha256:44eac21777dbbda7b8404d57a43c09d83fd9c93d0c1f0c960b5083ccb24d6d21"},
 ]
 torchattacks = [
     {file = "torchattacks-3.2.6-py3-none-any.whl", hash = "sha256:7f95b456d02177062fa688573f0cb3c85e31ff0db9eba873f16c34474284b417"},
