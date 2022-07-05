@@ -464,8 +464,10 @@ class UnlabelledDataModule(pl.LightningDataModule):
                                no_aug_query=self.no_aug_query, no_aug_support=self.no_aug_support,
                                img_size_crop=self.img_size,
                                img_size_orig=self.img_size_orig)
-
-        self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
+        if self.merge_train_val:
+            self.dataset_train = ConcatDataset([self.dataset_train, dataset_val])
+        else:
+            self.dataset_train = self.dataset_train
 
     def train_dataloader(self):
         dataloader_train = DataLoader(self.dataset_train,
