@@ -229,8 +229,7 @@ def get_featnet(architecture, inputW=80, inputH=80, dataset='miniimagenet'):
 
     elif architecture == 'resnet12':
         if dataset == 'miniimagenet' or dataset == 'tieredimagenet':
-            return resnet12.resnet12(avg_pool=False, drop_rate=0.1, dropblock_size=5), int(
-                640 * int(inputH / 2 ** 4) * int(inputW / 2 ** 4))
+            return resnet12.resnet12(avg_pool=True, drop_rate=0.1, dropblock_size=5), int(640)
         else:
             return resnet12.resnet12(avg_pool=False, drop_rate=0.1, dropblock_size=2), int(
                 640 * (inputH / 2 ** 4) * (inputW / 2 ** 4))
