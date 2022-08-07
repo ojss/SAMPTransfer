@@ -4,14 +4,13 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.realpath(os.path.dirname(__file__)),
                            '../'))
-import configs
 
 
 # Parse command line / default arguments
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--dataset', type=str, default='omniglot',
                     help='Dataset to load')
-parser.add_argument('--datapath', type=str, default=configs.data_path,
+parser.add_argument('--datapath', type=str, 
                     help='Path, where dataset are stored')
 args = parser.parse_args()
 
