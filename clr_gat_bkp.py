@@ -55,7 +55,7 @@ class GNN(nn.Module):
 class CLRGAT(pl.LightningModule):
     def __init__(self,
                  arch: str,
-                 out_planes: int,
+                 out_planes: Union[Iterable, int],
                  average_end: bool,
                  n_support,
                  n_query,
