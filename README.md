@@ -13,25 +13,34 @@ The code base requires `cuda` to run at its best in terms of speed.
 4. Run `poetry install`
 
 ## Running Experiments
+
 ### Datasets
+
 1. Make sure all required packages are installed before running the experiments
 2. Ensure that there is enough space for datasets to be downloaded - incase they haven't been downloaded already
-   1. You can use `download_data.py` to have `torchmeta` download the data for you
-   2. In the event the automatic downloader fails, please download the data from links given [**here**](https://github.com/tristandeleu/pytorch-meta/blob/c84c8e775f659741f7ad2ab9fbcfc1a78a4e76c9/docs/api_reference/datasets.md)
+    1. You can use `download_data.py` to have `torchmeta` download the data for you
+    2. In the event the automatic downloader fails, please download the data from links given [**
+       here**](https://github.com/tristandeleu/pytorch-meta/blob/c84c8e775f659741f7ad2ab9fbcfc1a78a4e76c9/docs/api_reference/datasets.md)
 
 ### Training
+
 1. To start a training run, simply execute `python clr_gat.py -c configs/slurm/mpnn.yml`
-   1. You may edit the `.yml` file to reflect your hardware availability
+    1. You may edit the `.yml` file to reflect your hardware availability
 2. This codebase uses Weights and Biases for all the logging needs, you may disable it from the config file if needed
 
 ### Evaluation
-Even though a testing run is triggered by the completion of training, you may want to test out the pre-trained checkpoint
+
+Even though a testing run is triggered by the completion of training, you may want to test out the pre-trained
+checkpoint
 artifacts generated during training.
 
-For this purpose, this codebase contains `evaluator.py` to make life easier. To use it
+For this purpose, this codebase contains `evaluator.py` to make life easier. To use it modify the following command:
 
-1. 
+```(bash)
+python evaluator.py <dataset> <path_to_checkpoint> <path_to_data> <n_ways> <k_shots> <query_shots> prototune --adapt ot --ft-freeze-backbone
+```
 
+We also provide our best pre-trained models in this repo.
 
 ## Results
 

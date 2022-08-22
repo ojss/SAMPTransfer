@@ -12,12 +12,13 @@ from dataloaders.dataloaders import UnlabelledDataModule
 
 app = typer.Typer()
 
+
 # pl.seed_everything(72)
 
 
 @app.command()
 def clrgat(dataset: str, ckpt_path: str, datapath: str, eval_ways: int, eval_shots: int, query_shots: int,
-           sup_finetune: str, config: Optional[str] = None, adapt: str = "ot"):
+           sup_finetune: str, config: Optional[str] = None, adapt: str = "ot", distance: str = "euclidean"):
     if torch.cuda.is_available():
         map_location = "cuda"
     else:
@@ -33,11 +34,12 @@ def clrgat(dataset: str, ckpt_path: str, datapath: str, eval_ways: int, eval_sho
         model = CLRGAT.load_from_checkpoint(checkpoint_path=ckpt_path,
                                             mpnn_dev=map_location,
                                             arch="conv4",
-                                            out_planes=64,
-                                            average_end=False,
+                                            # out_planes=64,
+                                            # average_end=False,
                                             label_cleansing_opts={
                                                 "use": False,
                                             },
+                                            distance=distance,
                                             use_hms=False,
                                             use_projector=False,
                                             projector_h_dim=2048,
