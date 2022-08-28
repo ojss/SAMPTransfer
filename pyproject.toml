@@ -2,7 +2,7 @@
 name = "pclrc-obow"
 version = "0.1.0"
 description = ""
-authors = ["Ojas Shirekar <ojas.shirekar@ojas.dev>"]
+authors = ["None"]
 
 [tool.poetry.dependencies]
 python = "3.9"

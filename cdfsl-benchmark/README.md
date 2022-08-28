@@ -17,9 +17,9 @@ Some instructions borrowed from the ProtoCLR repository.
 
 This step is optional as pre-trained models used in the paper are provided.
 
-#### Pre-train with C<sup>3</sup>LR on mini-ImageNet:
+#### Pre-train with SAMPTransfer on mini-ImageNet:
 
-`python train.py --dataset miniImagenet --method c3lr --stop_epoch 400 --n_support 1 --n_query 3 --no_aug_support`
+`python train.py --dataset miniImagenet --method gatclr --stop_epoch 400 --n_support 1 --n_query 3 --no_aug_support`
 
 #### Pre-train with ProtoTransfer on mini-ImageNet:
 
@@ -33,16 +33,16 @@ This step is optional as pre-trained models used in the paper are provided.
 
 The `finetune.py` script loads a pre-trained model (see above) and automatically tests on all 4 datasets: ISIC, CropDiseases, EuroSAT and ChestXray. All testing experiments use `5-way` (classes) but can be adjusted in terms of `K-shots` by setting `--n_test_shot K`, see below for examples from the paper.
 
-#### C<sup>3</sup>LR + ProtoTune
+#### SAMPTransfer + OpT-Tune
 
 `
-python finetune.py --model ResNet10 --method c3lr --train_aug --n_support 1 --n_query 3 --no_aug_support --adaptation --n_test_shot 5 --batch_size 50
+python finetune.py --model ResNet10 --method gatclr --train_aug --n_support 1 --n_query 3 --no_aug_support --adaptation --n_test_shot 5 --batch_size 50
 `
 
-#### C<sup>3</sup>LR + ProtoNet
+#### SAMPTransfer + ProtoNet
 
 `
-python finetune.py --model ResNet10 --method c3lr --train_aug --n_support 1 --n_query 3 --no_aug_support --n_test_shot 5 --batch_size 50
+python finetune.py --model ResNet10 --method gatclr --train_aug --n_support 1 --n_query 3 --no_aug_support --n_test_shot 5 --batch_size 64
 `
 
 #### ProtoCLR + ProtoTune

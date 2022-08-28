@@ -113,10 +113,8 @@ trainer:
 
 data:
   dataset: "miniimagenet"
-#  datapath: ../data/
-  datapath: /home/ojass/projects/unsupervised-meta-learning/data/untarred/
-  full_size_path: /home/ojass/projects/data/processed_images/
-#  full_size_path: ../data/processed_images
+  datapath: <datapath_here>
+  full_size_path: <datapath_here>
   n_support: 1
   n_query: 3
   batch_size: 16

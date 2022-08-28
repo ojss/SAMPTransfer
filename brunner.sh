@@ -41,6 +41,6 @@ echo "With config:"
 echo "$2"
 echo "Additional args:"
 echo "${@:3}"
-source activate /home/nfs/oshirekar/unsupervised_ml/ai2
+source activate <env_path_here>
 # send all remaining arguments
 srun python "$1" --config "$2" "${@:3}"

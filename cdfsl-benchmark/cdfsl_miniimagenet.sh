@@ -39,7 +39,7 @@ module load miniconda/3.9
 # For example: srun python my_program.py
 # Use this simple command to check that your sbatch settings are working (verify the resources allocated in the usage statistics)
 
-source activate /home/nfs/oshirekar/unsupervised_ml/ai2
+source activate <env_path_here>
 
 echo '++++++++++++++++++++++++++++++++++++++++++++++++'
 echo '+++++      ProtoCLR: Miniimagenet            +++++'

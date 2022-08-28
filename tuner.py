@@ -194,4 +194,4 @@ if __name__ == "__main__":
     with msg.loading("Init Ray"):
         ray.init(address=os.environ["ip_head"])
     tune_gat_clr_pbt(30, num_epochs=200, gpus_per_trial=1,
-                     data_dir="/home/nfs/oshirekar/unsupervised_ml/data/")
+                     data_dir="<data_path>")

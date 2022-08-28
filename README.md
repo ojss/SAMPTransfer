@@ -1,6 +1,16 @@
 # Offical repository for SAMPTransfer
 
 ## Introduction
+Humans have a unique ability to learn new representations from just a handful of examples with little to no supervision. Deep learning models, however, require a ton
+of data and supervision to perform at a satisfactory level. Unsupervised few-shot learning (U-FSL) is the pursuit of
+bridging this gap between machines and humans. Inspired by the capacity of graph neural networks (GNNs) in discovering complex inter-sample relationships, we propose
+a novel self-attention based message passing contrastive learning approach (coined as SAMP-CLR) for U-FSL pre-training. We also propose an optimal transport (OT) based
+fine-tuning strategy (we call OpT-Tune) to efficiently induce task awareness into our novel end-to-end unsupervised
+few-shot classification framework (SAMPTransfer). Our extensive experimental results corroborate the efficacy of
+SAMPTransfer in a variety of downstream few-shot classification scenarios, setting a new state-of-the-art for U-FSL
+on both miniImageNet and tieredImageNet benchmarks, offering up to 7%+ and 5%+ improvements, respectively. Our
+further investigations also confirm that SAMPTransfer remains on-par with some supervised baselines on miniImageNet
+and outperforms all existing U-FSL baselines in a challenging cross-domain scenario.
 
 ## Requirements
 
@@ -21,6 +31,7 @@ The code base requires `cuda` to run at its best in terms of speed.
     1. You can use `download_data.py` to have `torchmeta` download the data for you
     2. In the event the automatic downloader fails, please download the data from links given [**
        here**](https://github.com/tristandeleu/pytorch-meta/blob/c84c8e775f659741f7ad2ab9fbcfc1a78a4e76c9/docs/api_reference/datasets.md)
+3. CDFSL Benchmark [download instructions are here](https://github.com/IBM/cdfsl-benchmark)
 
 ### Training
 
@@ -31,8 +42,7 @@ The code base requires `cuda` to run at its best in terms of speed.
 ### Evaluation
 
 Even though a testing run is triggered by the completion of training, you may want to test out the pre-trained
-checkpoint
-artifacts generated during training.
+checkpoint artifacts generated during training.
 
 For this purpose, this codebase contains `evaluator.py` to make life easier. To use it modify the following command:
 
@@ -40,41 +50,39 @@ For this purpose, this codebase contains `evaluator.py` to make life easier. To 
 python evaluator.py <dataset> <path_to_checkpoint> <path_to_data> <n_ways> <k_shots> <query_shots> prototune --adapt ot --ft-freeze-backbone
 ```
 
-We also provide our best pre-trained models in this repo.
-
 ## Results
 
 The results on mini-ImageNet and tieredImageNet are given below:
 
-|  |  | mini-ImageNet |  |
-| :--- | :---: | :---: | :---: |
-| Method (N,K) | Backbone | (5,1) | (5,5) |
+|  |  | mini-ImageNet |             |
+| :--- | :---: | :---: |:-----------:|
+| Method (N,K) | Backbone | (5,1) |    (5,5)    |
 | CACTUs-MAML  | Conv4 | 39.90+-0.74 | 53.97+-0.70 |
 | CACTUs-Proto  | Conv4 | 39.18+-0.71 | 53.36+-0.70 |
-| UMTRA  | Conv4 | 39.93 | 50.73 |
+| UMTRA  | Conv4 | 39.93 |    50.73    |
 | AAL-ProtoNet  | Conv4 | 37.67+-0.39 | 40.29+-0.68 |
 | AAL-MAML++  | Conv4 | 34.57+-0.74 | 49.18+-0.47 |
 | UFLST  | Conv4 | 33.77+-0.70 | 45.03+-0.73 |
 | ULDA-ProtoNet  | Conv4 | 40.63+-0.61 | 55.41+-0.57 |
 | ULDA-MetaNet  | Conv4 | 40.71+-0.62 | 54.49+-0.58 |
 | U-SoSN+ArL  | Conv4 | 41.13+-0.84 | 55.39+-0.79 |
-| U-MISo  | Conv4 | 41.09 | 55.38 |
+| U-MISo  | Conv4 | 41.09 |    55.38    |
 | ProtoTransfer  | Conv4 | 45.67+-0.79 | 62.99+-0.75 |
-| CUMCA  | Conv4 | 41.12 | 54.55 |
-| Meta-GMVAE  | Conv4 | 42.82 | 55.73 |
+| CUMCA  | Conv4 | 41.12 |    54.55    |
+| Meta-GMVAE  | Conv4 | 42.82 |    55.73    |
 | Revisiting UML  | Conv4 | 48.12+-0.19 | 65.33+-0.17 |
 | CSSL-FSL_Mini64  | Conv4 | 48.53+-1.26 | 63.13+-0.87 |
 | $\text{C}^3\text{LR}$  | Conv4 | 47.92+-1.2 | 64.81+-1.15 |
-| SAMPTransfer (ours) | Conv4 | 55.75+-0.77 | 67.62+-0.66 |
+| SAMPTransfer (ours) | Conv4 | 55.75+-0.77 | 68.33+-0.66 |
 | SAMPTransfer* (ours) | Conv4b | 61.02+-1.0 | 72.52+-0.68 |
 | MAML  | Conv4 | 46.81+-0.77 | 62.13+-0.72 |
-| **Supervised** | :---: | :---: | :---: |
+| **Supervised** | :---: | :---: |    :---:    |
 | ProtoNet  | Conv4 | 46.44+-0.78 | 66.33+-0.68 |
 | MMC  | Conv4 | 50.41+-0.31 | 64.39+-0.24 |
-| FEAT  | Conv4 | 55.15 | 71.61 |
+| FEAT  | Conv4 | 55.15 |    71.61    |
 | SimpleShot  | Conv4 | 49.69+-0.19 | 66.92+-0.17 |
-| Simple CNAPS  | ResNet-18 | 53.2+-0.9 | 70.8+-0.7 |
-| Transductive CNAPS  | ResNet-18 | 55.6+-0.9 | 73.1+-0.7 |
+| Simple CNAPS  | ResNet-18 | 53.2+-0.9 |  70.8+-0.7  |
+| Transductive CNAPS  | ResNet-18 | 55.6+-0.9 |  73.1+-0.7  |
 | MetaQDA  | Conv4 | 56.41+-0.80 | 72.64+-0.62 |
 | Pre+Linear  | Conv4 | 43.87+-0.69 | 63.01+-0.71 |
 
