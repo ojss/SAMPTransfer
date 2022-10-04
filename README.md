@@ -12,6 +12,17 @@ on both miniImageNet and tieredImageNet benchmarks, offering up to 7%+ and 5%+ i
 further investigations also confirm that SAMPTransfer remains on-par with some supervised baselines on miniImageNet
 and outperforms all existing U-FSL baselines in a challenging cross-domain scenario.
 
+### SAMP-CLR (Pre-Training)
+![](assets/Pre-Training.png)
+
+### OpT-Tune (Fine-Tuning)
+![](assets/Fine-Tuning.png)
+
+## Algorithms
+SAMP-CLR             |  OpT-Tune
+:-------------------------:|:-------------------------:
+![](assets/algo1.png)  |  ![](assets/algo2.png)
+
 ## Requirements
 
 The code base requires `cuda` to run at its best in terms of speed.
@@ -57,12 +68,6 @@ The results on mini-ImageNet and tieredImageNet are given below:
 |  |  | mini-ImageNet |             |
 | :--- | :---: | :---: |:-----------:|
 | Method (N,K) | Backbone | (5,1) |    (5,5)    |
-| CACTUs-MAML  | Conv4 | 39.90+-0.74 | 53.97+-0.70 |
-| CACTUs-Proto  | Conv4 | 39.18+-0.71 | 53.36+-0.70 |
-| UMTRA  | Conv4 | 39.93 |    50.73    |
-| AAL-ProtoNet  | Conv4 | 37.67+-0.39 | 40.29+-0.68 |
-| AAL-MAML++  | Conv4 | 34.57+-0.74 | 49.18+-0.47 |
-| UFLST  | Conv4 | 33.77+-0.70 | 45.03+-0.73 |
 | ULDA-ProtoNet  | Conv4 | 40.63+-0.61 | 55.41+-0.57 |
 | ULDA-MetaNet  | Conv4 | 40.71+-0.62 | 54.49+-0.58 |
 | U-SoSN+ArL  | Conv4 | 41.13+-0.84 | 55.39+-0.79 |
@@ -75,8 +80,8 @@ The results on mini-ImageNet and tieredImageNet are given below:
 | $\text{C}^3\text{LR}$  | Conv4 | 47.92+-1.2 | 64.81+-1.15 |
 | SAMPTransfer (ours) | Conv4 | 55.75+-0.77 | 68.33+-0.66 |
 | SAMPTransfer* (ours) | Conv4b | 61.02+-1.0 | 72.52+-0.68 |
-| MAML  | Conv4 | 46.81+-0.77 | 62.13+-0.72 |
 | **Supervised** | :---: | :---: |    :---:    |
+| MAML  | Conv4 | 46.81+-0.77 | 62.13+-0.72 |
 | ProtoNet  | Conv4 | 46.44+-0.78 | 66.33+-0.68 |
 | MMC  | Conv4 | 50.41+-0.31 | 64.39+-0.24 |
 | FEAT  | Conv4 | 55.15 |    71.61    |
@@ -96,3 +101,27 @@ The results on mini-ImageNet and tieredImageNet are given below:
 | U-MISo  | 43.01+-0.91 | 57.53+-0.74 |
 | SAMPTransfer (ours) | 45.25+-0.89 | 59.75+-0.66 |
 | SAMPTransfer* (ours) | 49.10+-0.94 | 65.19+-0.82 |
+
+# Citation
+
+
+# Contact
+
+Corresponding author: Ojas Kishore Shirekar (<ojas.shirekar@gmail.com>)
+
+# References
+1. Qin, T., Li, W., Shi, Y., & Gao, Y. (2020). Diversity Helps: Unsupervised Few-shot Learning via Distribution Shift-based Data Augmentation. Retrieved from https://github.com/WonderSeven/ULDA.
+2. Zhang, H., Koniusz, P., Jian, S., Li, H., & Torr, P. H. S. (2020). Rethinking Class Relations: Absolute-relative Supervised and Unsupervised Few-shot Learning. Retrieved from http://arxiv.org/abs/2001.03919
+3. Zhang, H., Li, H., & Koniusz, P. (2022). Multi-level Second-order Few-shot Learning. IEEE Transactions on Multimedia. https://doi.org/10.1109/TMM.2022.3142955
+4. Medina, C., Devos, A., & Grossglauser, M. (2020). Self-Supervised Prototypical Transfer Learning for Few-Shot Classification. Retrieved from http://arxiv.org/abs/2006.11325
+5. Xu, Hui, et al. "Unsupervised meta-learning for few-shot learning." Pattern Recognition 116 (2021): 107951.
+6. Bok Lee, D., Min, D., Lee, S., Ju Hwang, S., & Korea, S. (n.d.). META-GMVAE: MIXTURE OF GAUSSIAN VAES FOR UNSUPERVISED META-LEARNING.
+7. Ye, H.-J., Han, L., & Zhan, D.-C. (2022). Revisiting Unsupervised Meta-Learning via the Characteristics of Few-Shot Tasks. IEEE Transactions on Pattern Analysis and Machine Intelligence, 1–1. https://doi.org/10.1109/TPAMI.2022.3179368
+8. Li, Jianyi, and Guizhong Liu. "Few-shot image classification via contrastive self-supervised learning." arXiv preprint arXiv:2008.09942 (2020).
+9. Shirekar, Ojas Kishore, and Hadi Jamali-Rad. "Self-Supervised Class-Cognizant Few-Shot Classification." arXiv preprint arXiv:2202.08149 (2022).
+10. Finn, Chelsea, Pieter Abbeel, and Sergey Levine. "Model-agnostic meta-learning for fast adaptation of deep networks." International conference on machine learning. PMLR, 2017.
+11. Snell, Jake, Kevin Swersky, and Richard Zemel. "Prototypical networks for few-shot learning." Advances in neural information processing systems 30 (2017).
+12. Ye, Han-Jia, et al. "Few-shot learning via embedding adaptation with set-to-set functions." Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 2020.
+13. Wang, Yan, et al. "Simpleshot: Revisiting nearest-neighbor classification for few-shot learning." arXiv preprint arXiv:1911.04623 (2019).
+14. Bateni, Peyman, et al. "Enhancing few-shot image classification with unlabelled examples." Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision. 2022.
+15. Zhang, Xueting, et al. "Shallow bayesian meta learning for real-world few-shot recognition." Proceedings of the IEEE/CVF International Conference on Computer Vision. 2021.
