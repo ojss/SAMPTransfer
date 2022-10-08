@@ -46,7 +46,8 @@ The code base requires `cuda` to run at its best in terms of speed.
 
 ### Training
 
-1. To start a training run, simply execute `python clr_gat.py -c configs/slurm/mpnn.yml`
+1. Edit the `datapath` key in config file:`configs/slurm/mpnn.yml` to the location where your dataset is stored
+2. To start a training run, simply execute `python clr_gat.py -c configs/slurm/mpnn.yml`
     1. You may edit the `.yml` file to reflect your hardware availability
 2. This codebase uses Weights and Biases for all the logging needs, you may disable it from the config file if needed
 
