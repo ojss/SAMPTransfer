@@ -150,3 +150,5 @@ scratch.*
 /solo-learn
 /slurm-launch.py
 /slurm-template.sh
+
+.DS_Store

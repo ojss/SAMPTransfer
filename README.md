@@ -80,16 +80,6 @@ The results on mini-ImageNet and tieredImageNet are given below:
 | $\text{C}^3\text{LR}$  | Conv4 | 47.92+-1.2 | 64.81+-1.15 |
 | SAMPTransfer (ours) | Conv4 | 55.75+-0.77 | 68.33+-0.66 |
 | SAMPTransfer* (ours) | Conv4b | 61.02+-1.0 | 72.52+-0.68 |
-| **Supervised** | :---: | :---: |    :---:    |
-| MAML  | Conv4 | 46.81+-0.77 | 62.13+-0.72 |
-| ProtoNet  | Conv4 | 46.44+-0.78 | 66.33+-0.68 |
-| MMC  | Conv4 | 50.41+-0.31 | 64.39+-0.24 |
-| FEAT  | Conv4 | 55.15 |    71.61    |
-| SimpleShot  | Conv4 | 49.69+-0.19 | 66.92+-0.17 |
-| Simple CNAPS  | ResNet-18 | 53.2+-0.9 |  70.8+-0.7  |
-| Transductive CNAPS  | ResNet-18 | 55.6+-0.9 |  73.1+-0.7  |
-| MetaQDA  | Conv4 | 56.41+-0.80 | 72.64+-0.62 |
-| Pre+Linear  | Conv4 | 43.87+-0.69 | 63.01+-0.71 |
 
 |  | tieredImageNet |  |
 | :--- | :---: | :---: |
