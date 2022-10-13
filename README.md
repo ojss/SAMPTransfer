@@ -1,4 +1,6 @@
-# Offical repository for SAMPTransfer
+[![arXiv](https://img.shields.io/badge/arXiv-2210.06339-<COLOR>.svg)](https://arxiv.org/abs/2210.06339)
+
+# Offical repository for [Self-Attention Message Passing for Contrastive Few-Shot Learning](https://arxiv.org/abs/2210.06339)(Ojas Kishore Shirekar, Anuj Singh, Hadi Jamali-Rad)
 
 ## Introduction
 
@@ -101,7 +103,16 @@ The results on mini-ImageNet and tieredImageNet are given below:
 | SAMPTransfer* (ours) ([Checkpoint](checkpoints/tieredimagenet/))| 49.10+-0.94 | 65.19+-0.82 |
 
 # Citation
-
+```(bibtex)
+@misc{https://doi.org/10.48550/arxiv.2210.06339,
+  doi = {10.48550/ARXIV.2210.06339},
+  
+  url = {https://arxiv.org/abs/2210.06339},
+  
+  author = {Shirekar, Ojas Kishorkumar and Singh, Anuj and Jamali-Rad, Hadi},
+  
+  keywords = {Computer Vision and Pattern Recognition (cs.CV), FOS: Computer and information sciences, FOS: Computer and information sciences},
+```
 # Contact
 
 Corresponding author: Ojas Kishore Shirekar (<ojas.shirekar@gmail.com>)
