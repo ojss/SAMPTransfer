@@ -1,8 +1,11 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2210.06339-<COLOR>.svg)](https://arxiv.org/abs/2210.06339)
 
-# Offical repository for [Self-Attention Message Passing for Contrastive Few-Shot Learning](https://arxiv.org/abs/2210.06339)(Ojas Kishore Shirekar, Anuj Singh, Hadi Jamali-Rad)
+# This repo holds the code for SAMPTransfer
+## Offical repository for [Self-Attention Message Passing for Contrastive Few-Shot Learning](https://arxiv.org/abs/2210.06339)(Ojas Kishore Shirekar, Anuj Singh, Hadi Jamali-Rad)
+**This paper is accepted to appear in the proceedings of [WACV 2023](https://wacv2023.thecvf.com/home)**
 
-## Introduction
+
+# Introduction
 
 Humans have a unique ability to learn new representations from just a handful of examples with little to no supervision.
 Deep learning models, however, require a ton
@@ -18,11 +21,11 @@ on both miniImageNet and tieredImageNet benchmarks, offering up to 7%+ and 5%+ i
 further investigations also confirm that SAMPTransfer remains on-par with some supervised baselines on miniImageNet
 and outperforms all existing U-FSL baselines in a challenging cross-domain scenario.
 
-### SAMP-CLR (Pre-Training)
+## SAMP-CLR (Pre-Training)
 
 ![](assets/Pre-Training.png)
 
-### OpT-Tune (Fine-Tuning)
+## OpT-Tune (Fine-Tuning)
 
 ![](assets/Fine-Tuning.png)
 
