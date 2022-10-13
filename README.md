@@ -4,6 +4,10 @@
 ## Offical repository for [Self-Attention Message Passing for Contrastive Few-Shot Learning](https://arxiv.org/abs/2210.06339)(Ojas Kishore Shirekar, Anuj Singh, Hadi Jamali-Rad)
 **This paper is accepted to appear in the proceedings of [WACV 2023](https://wacv2023.thecvf.com/home)**
 
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/self-attention-message-passing-for/unsupervised-few-shot-image-classification-on)](https://paperswithcode.com/sota/unsupervised-few-shot-image-classification-on?p=self-attention-message-passing-for)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/self-attention-message-passing-for/unsupervised-few-shot-image-classification-on-3)](https://paperswithcode.com/sota/unsupervised-few-shot-image-classification-on-3?p=self-attention-message-passing-for)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/self-attention-message-passing-for/unsupervised-few-shot-image-classification-on-1)](https://paperswithcode.com/sota/unsupervised-few-shot-image-classification-on-1?p=self-attention-message-passing-for)
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/self-attention-message-passing-for/unsupervised-few-shot-image-classification-on-2)](https://paperswithcode.com/sota/unsupervised-few-shot-image-classification-on-2?p=self-attention-message-passing-for)
 
 # Introduction
 
